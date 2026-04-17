@@ -71,6 +71,14 @@ GLExtension_t GLimp_ExtensionPointer( const char *name );
 #define QGLPROC(name, rettype, args) extern rettype (APIENTRYP q##name) args;
 #include "renderer/qgl_proc.h"
 
+#ifdef GLES2_BACKEND
+// GLES2-specific function pointer declarations (shader/program, core VBO,
+// FBO, uniforms, vertex attributes, and GLES2-named texture functions).
+// Resolved at runtime via SDL_GL_GetProcAddress — no libGLESv2 linkage.
+#define QGLPROC(name, rettype, args) extern rettype (APIENTRYP q##name) args;
+#include "renderer/qgl_proc_es2.h"
+#endif
+
 // multitexture
 extern	void ( APIENTRY * qglMultiTexCoord2fARB )( GLenum texture, GLfloat s, GLfloat t );
 extern	void ( APIENTRY * qglMultiTexCoord2fvARB )( GLenum texture, GLfloat *st );

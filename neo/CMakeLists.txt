@@ -65,6 +65,8 @@ option(TRACY		"Build and integrate the Tracy profiler, requires HARDLINK_GAME" O
 
 option(HARDLINK_GAME "Compile gamecode into executable (no game DLLs)" OFF)
 
+option(GLES2 "Build with OpenGL ES 2.0 backend (runtime proc resolution, no libGLESv2 linkage)" OFF)
+
 if(NOT MSVC) # GCC/clang or compatible, hopefully
 	option(FORCE_COLORED_OUTPUT "Always produce ANSI-colored compiler warnings/errors (GCC/Clang only; esp. useful with ninja)." OFF)
 	option(ASAN		"Enable GCC/Clang Adress Sanitizer (ASan)" OFF) # TODO: MSVC might also support this, somehow?
@@ -230,6 +232,16 @@ endif()
 if(REPRODUCIBLE_BUILD)
 	# don't use __DATE__ and __TIME__ macros so builds are reproducible
 	add_definitions(-DID_REPRODUCIBLE_BUILD)
+endif()
+
+if(GLES2)
+	add_definitions(-DGLES2_BACKEND)
+	message(STATUS "OpenGL ES 2.0 backend enabled (runtime proc resolution)")
+	if(IMGUI)
+		message(STATUS "Disabling ImGui for GLES2 build (proper GLES2 ImGui support is Phase 7)")
+		set(IMGUI OFF)
+		add_definitions(-DIMGUI_DISABLE)
+	endif()
 endif()
 
 if(IMGUI)
@@ -629,7 +641,6 @@ set(src_renderer
 	renderer/RenderWorld_load.cpp
 	renderer/RenderWorld_portals.cpp
 	renderer/VertexCache.cpp
-	renderer/draw_arb2.cpp
 	renderer/draw_common.cpp
 	renderer/tr_backend.cpp
 	renderer/tr_deform.cpp
@@ -651,6 +662,12 @@ set(src_renderer
 
 	renderer/stblib_impls.c
 )
+
+if(GLES2)
+	list(APPEND src_renderer renderer/draw_gles2.cpp)
+else()
+	list(APPEND src_renderer renderer/draw_arb2.cpp)
+endif()
 
 always_optimize_sourcefile(renderer/stblib_impls.c)
 
@@ -873,9 +890,14 @@ if(IMGUI)
 		set(src_imgui libs/imgui/backends/imgui_impl_sdl2.cpp)
 	endif()
 
+if(GLES2)
+	set(src_imgui ${src_imgui} libs/imgui/backends/imgui_impl_opengl3.cpp)
+	add_definitions(-DIMGUI_IMPL_OPENGL_ES2)
+else()
+	set(src_imgui ${src_imgui} libs/imgui/backends/imgui_impl_opengl2.cpp)
+endif()
+
 set(src_imgui ${src_imgui}
-	libs/imgui/backends/imgui_impl_opengl2.cpp
-	
 	libs/imgui/imgui.h
 	libs/imgui/imgui.cpp
 	libs/imgui/imgui_draw.cpp
@@ -1266,6 +1288,12 @@ endif()
 
 include_directories(${CMAKE_BINARY_DIR})
 include_directories(${CMAKE_SOURCE_DIR})
+
+if(GLES2)
+	# Provides <GLES2/gl2.h> via SDL's bundled headers on platforms that lack
+	# system GLES2 headers (e.g., macOS desktop).
+	include_directories(${CMAKE_SOURCE_DIR}/sys/gles2_shim)
+endif()
 
 add_library(idlib STATIC ${src_idlib})
 if(SDL3)

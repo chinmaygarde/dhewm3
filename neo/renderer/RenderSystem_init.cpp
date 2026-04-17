@@ -258,6 +258,12 @@ idCVar r_glDebugContext( "r_glDebugContext", "0", CVAR_RENDERER | CVAR_BOOL, "En
 #define QGLPROC(name, rettype, args) rettype (APIENTRYP q##name) args;
 #include "renderer/qgl_proc.h"
 
+#ifdef GLES2_BACKEND
+// define GLES2-specific function pointer storage
+#define QGLPROC(name, rettype, args) rettype (APIENTRYP q##name) args;
+#include "renderer/qgl_proc_es2.h"
+#endif
+
 void ( APIENTRY * qglMultiTexCoord2fARB )( GLenum texture, GLfloat s, GLfloat t );
 void ( APIENTRY * qglMultiTexCoord2fvARB )( GLenum texture, GLfloat *st );
 void ( APIENTRY * qglActiveTextureARB )( GLenum texture );
@@ -820,12 +826,27 @@ void R_InitOpenGL( void ) {
 	}
 
 // load qgl function pointers
-#define QGLPROC(name, rettype, args) \
-	q##name = (rettype(APIENTRYP)args)GLimp_ExtensionPointer(#name); \
-	if (!q##name) \
-		common->FatalError("Unable to initialize OpenGL (%s)", #name);
-
-#include "renderer/qgl_proc.h"
+#ifndef GLES2_BACKEND
+	// Desktop GL path: all qgl_proc.h functions are required.
+	#define QGLPROC(name, rettype, args) \
+		q##name = (rettype(APIENTRYP)args)GLimp_ExtensionPointer(#name); \
+		if (!q##name) \
+			common->FatalError("Unable to initialize OpenGL (%s)", #name);
+	#include "renderer/qgl_proc.h"
+#else
+	// GLES2 path: attempt to resolve qgl_proc.h functions but don't fatal-error
+	// on null — desktop-GL-only functions (glBegin, glMatrixMode, etc.) will
+	// simply be null on a GLES2 context and must not be called from GLES2 paths.
+	#define QGLPROC(name, rettype, args) \
+		q##name = (rettype(APIENTRYP)args)GLimp_ExtensionPointer(#name);
+	#include "renderer/qgl_proc.h"
+	// GLES2-specific functions are required; fatal-error if missing.
+	#define QGLPROC(name, rettype, args) \
+		q##name = (rettype(APIENTRYP)args)GLimp_ExtensionPointer(#name); \
+		if (!q##name) \
+			common->FatalError("Unable to initialize OpenGL ES (%s)", #name);
+	#include "renderer/qgl_proc_es2.h"
+#endif
 
 	// input and sound systems need to be tied to the new window
 	Sys_InitInput();

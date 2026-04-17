@@ -26,6 +26,26 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
+    },
+    {
+      "name": "gles2-debug",
+      "inherits": "setup",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../build/gles2",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "GLES2": "ON"
+      }
+    },
+    {
+      "name": "gles2-release",
+      "inherits": "setup",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../build/gles2-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "GLES2": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -36,6 +56,14 @@
     {
       "name": "release",
       "configurePreset": "release"
+    },
+    {
+      "name": "gles2-debug",
+      "configurePreset": "gles2-debug"
+    },
+    {
+      "name": "gles2-release",
+      "configurePreset": "gles2-release"
     }
   ],
   "testPresets": [
