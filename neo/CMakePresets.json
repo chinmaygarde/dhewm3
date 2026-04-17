@@ -5,7 +5,8 @@
       "name": "setup",
       "hidden": true,
       "cacheVariables": {
-
+        "OPENAL_INCLUDE_DIR": "/opt/homebrew/opt/openal-soft/include",
+        "OPENAL_LIBRARY": "/opt/homebrew/opt/openal-soft/lib/libopenal.dylib"
       }
     },
     {
