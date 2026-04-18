@@ -66,38 +66,87 @@ This is a large project structured into 7 phases. Each phase is independently bu
 
 ---
 
-### Phase 3: GLSL Shader System
+### Phase 3: Runtime ARB→GLSL ES Translator
 
-**Goal**: Write GLSL ES 1.00 equivalents of all ARB assembly programs and wire up the shader compilation/linking infrastructure.
+**Goal**: Translate ARB assembly programs to GLSL ES 1.00 at runtime so the existing `.vfp` game data is reused directly. No hand-written GLSL shader files.
 
-**New files** (in `neo/renderer/gles2/`):
-- `interaction.vert` / `interaction.frag` — per-light diffuse+specular+bump interaction (replaces `glprogs/interaction.vfp`)
-- `ambient.vert` / `ambient.frag` — ambient pass (replaces `glprogs/ambientLight.vfp`)
-- `shadow.vert` — stencil shadow volume extrusion (replaces `glprogs/shadow.vp`)
-- `environment.vert` / `environment.frag` — environment map (replaces `glprogs/environment.vfp`)
-- `bumpy_environment.vert` / `bumpy_environment.frag`
-- `glasswarp.vert` / `glasswarp.frag`
-- `soft_particle.vert` / `soft_particle.frag`
-- `color.vert` / `color.frag` — solid color pass (replaces fixed-function colored draws)
-- `texture.vert` / `texture.frag` — textured pass (replaces fixed-function textured draws)
+**Rationale**: The `.vfp` files are plain-text ARB assembly loaded from pak files at runtime via `R_LoadARBProgram` (`draw_arb2.cpp:495`). The format is a highly regular RISC instruction set with no control flow. Under `GLES2_BACKEND`, the same text is intercepted after `fileSystem->ReadFile` returns it and before it is submitted to GL, translated to GLSL ES 1.00, then compiled via `glCreateShader`/`glShaderSource`. This approach automatically handles all current shaders, the inline soft-particle shader, and any mod-supplied `.vfp` files.
 
-**Key shader translation notes**:
-- ARB `c[N]` constants → GLSL `uniform vec4 uProgramEnv[N]` or named uniforms
-- ARB `fragment.texcoord[N]` → `varying vec2 vTexCoord[N]`
-- ARB `TEX result.color, fragment.texcoord[0], texture[0], 2D` → `texture2D(uTex0, vTexCoord0)`
-- `gl_FragColor` required (no `out vec4` in GLSL ES 1.00)
-- All `precision mediump float;` declarations required at top of fragment shaders
-- No `gl_FragDepth` in base GLES2 (soft particles need `GL_EXT_frag_depth` or workaround)
+**Hook point**: `draw_arb2.cpp:521` — `buffer` holds the full shader text as a C string. Under `GLES2_BACKEND`, `R_LoadARBProgram` calls the translator instead of `glProgramStringARB`.
+
+**New file**: `neo/renderer/arb2glsl.cpp` (+ `arb2glsl.h`) — self-contained translator, no external dependencies.
+
+**Translator responsibilities**:
+
+1. **Detect program type** from magic header: `!!ARBvp1.0` → vertex shader, `!!ARBfp1.0` → fragment shader.
+
+2. **First pass — collect declarations**: scan all instructions to find:
+   - All `TEMP` register names → emit `vec4 name;` locals
+   - All `program.env[N]` indices referenced → emit `uniform vec4 uProgramEnv[MAXN];`
+   - All `vertex.*` inputs referenced → emit `attribute vec4 aName;`
+   - All `result.texcoord[N]` (VP) / `fragment.texcoord[N]` (FP) → emit matching `varying vec4 vTexCoordN;`
+   - All `texture[N]` samplers → emit `uniform sampler2D uTexN;`
+   - `OPTION ARB_position_invariant` present → note that VP must write `gl_Position`
+
+3. **Emit preamble**:
+   ```glsl
+   precision mediump float;
+   // ... collected uniforms, attributes, varyings ...
+   void main() {
+   ```
+
+4. **Second pass — translate instructions** one-to-one:
+
+   | ARB instruction | GLSL ES emission |
+   |---|---|
+   | `MOV dst, src` | `dst = src;` |
+   | `ADD dst, a, b` | `dst = a + b;` |
+   | `MUL dst, a, b` | `dst = a * b;` |
+   | `MAD dst, a, b, c` | `dst = a * b + c;` |
+   | `DP3 dst, a, b` | `dst = vec4(dot(a.xyz, b.xyz));` |
+   | `DP4 dst, a, b` | `dst = vec4(dot(a, b));` |
+   | `RCP dst, src` | `dst = vec4(1.0 / src.x);` |
+   | `RSQ dst, src` | `dst = vec4(inversesqrt(src.x));` |
+   | `POW dst, a, b` | `dst = vec4(pow(a.x, b.x));` |
+   | `MIN dst, a, b` | `dst = min(a, b);` |
+   | `MAX dst, a, b` | `dst = max(a, b);` |
+   | `ABS dst, src` | `dst = abs(src);` |
+   | `FRC dst, src` | `dst = fract(src);` |
+   | `FLR dst, src` | `dst = floor(src);` |
+   | `CMP dst, c, a, b` | `dst = mix(a, b, step(0.0, c));` (component-wise) |
+   | `TEX dst, coord, texture[N], 2D` | `dst = texture2D(uTexN, coord.xy);` |
+   | `TXP dst, coord, texture[N], 2D` | `dst = texture2DProj(uTexN, coord.xyw);` |
+   | `MUL_SAT dst, a, b` | `dst = clamp(a * b, 0.0, 1.0);` |
+   | `result.color` (FP) | `gl_FragColor` |
+   | `result.position` (VP) | `gl_Position` |
+   | `OPTION ARB_position_invariant` | emit `gl_Position = uMVP * aPosition;` at end of VP |
+
+5. **Swizzle and write-mask passthrough**: `.xyzw`, `.xyz`, `.xy`, `.x` etc. are identical syntax in GLSL — emit verbatim.
+
+6. **`PARAM` constants**: `PARAM name = {a, b, c, d}` → `const vec4 name = vec4(a, b, c, d);` in preamble. `PARAM name = program.env[N]` → alias resolved at reference sites to `uProgramEnv[N]`.
+
+7. **Gamma hack compatibility**: dhewm3's `r_gammaInShader` path (`draw_arb2.cpp:574`) patches the ARB text before submission. The translator receives the already-patched string, so `dhewm3tmpres` is just another `TEMP` register and the injected `MUL_SAT`/`POW`/`MOV` instructions translate normally. `result.color` → `gl_FragColor` renaming is handled by the normal output register mapping.
+
+8. **`GLES2_BACKEND`-only fixed-function replacements**: Two small hand-written GLSL ES programs are needed for draw calls that have no ARB counterpart (fixed-function colored and textured draws in `tr_rendertools.cpp` / debug paths). These are embedded as C string literals in `draw_gles2.cpp` — not separate files. They are minimal: a color-pass pair and a texture-pass pair (~30 lines total).
 
 **New infrastructure in `draw_gles2.cpp`**:
-- `struct glesProgram_t { GLuint vert, frag, prog; GLint uniforms[32]; }`
-- `R_GLES2_LoadShader(GLenum type, const char *src)` — compile with error logging
-- `R_GLES2_LinkProgram(GLuint vert, GLuint frag)` — link and query uniform/attribute locations
-- `glesProgs[NUM_PROGS]` array parallel to existing `progs[]` in draw_arb2.cpp
-- `R_GLES2_Init()` — compiles all programs, validates, sets `glConfig.allowGLES2Path`
-- Uniform setters: `R_GLES2_SetUniform4fv(prog, slot, vec)` wrapper
+- `struct glesProgram_t { GLuint vert, frag, prog; GLint uProgramEnvLoc; }` — one per loaded ARB program pair
+- `R_GLES2_CompileGLSL(GLenum type, const char *src)` — `glCreateShader` + `glShaderSource` + `glCompileShader` with error logging
+- `R_GLES2_LinkProgram(GLuint vert, GLuint frag)` — `glCreateProgram` + `glAttachShader` + `glLinkProgram`
+- `R_GLES2_LoadProgram(const char *arbSrc, GLenum target)` — calls translator, then compile+link
+- `glesProgs[]` array parallel to `progs[]` in `draw_arb2.cpp`; indexed by same `progIndex`
+- `R_GLES2_Init()` — drives `R_LoadARBProgram` for all entries, validates, sets `glConfig.allowGLES2Path`
 
-**Verification**: All shaders compile without errors on the target GLES2 context.
+**Attribute binding convention** (fixed across all translated shaders via `glBindAttribLocation` before link):
+- attrib 0: `aPosition` (`vertex.position`)
+- attrib 1: `aTexCoord0` (`vertex.texcoord[0]` / `vertex.texcoord`)
+- attrib 2: `aTexCoord1` (`vertex.texcoord[1]`)
+- attrib 3: `aNormal` (`vertex.normal`)
+- attrib 4: `aTangent` (`vertex.attrib[9]`)
+- attrib 5: `aBitangent` (`vertex.attrib[10]`)
+- attrib 6: `aColor` (`vertex.color`)
+
+**Verification**: All `.vfp` shaders translate and compile without GLSL errors on the target GLES2 context. Translated source is logged at `developer 1` verbosity for inspection.
 
 ---
 
@@ -111,7 +160,7 @@ This is a large project structured into 7 phases. Each phase is independently bu
 - `neo/renderer/draw_common.cpp` — in `#ifdef GLES2_BACKEND` blocks, replace `RB_T_FillDepthBuffer`, `RB_SetupForFastPath`, etc. to use `glVertexAttribPointer` instead of `glVertexPointer`/`glTexCoordPointer`
 - `neo/renderer/VertexCache.cpp` — VBO management already uses `qglBindBufferARB`; add `#ifdef GLES2_BACKEND` paths that use core GLES2 `glBindBuffer` / `glGenBuffers`
 - `neo/renderer/tr_backend.cpp` — `RB_SetDefaultGLState()` uses `glEnableClientState(GL_VERTEX_ARRAY)` etc.; guard with `#ifndef GLES2_BACKEND`, add GLES2 replacement that sets up attribute arrays
-- `neo/renderer/draw_gles2.cpp` — implement `RB_GLES2_DrawInteraction()`, `RB_GLES2_DrawAmbient()`, `RB_GLES2_FillDepthBuffer()`, routing to the GLSL programs from Phase 3
+- `neo/renderer/draw_gles2.cpp` — implement `RB_GLES2_DrawInteraction()`, `RB_GLES2_DrawAmbient()`, `RB_GLES2_FillDepthBuffer()`, routing to the translated programs from Phase 3
 
 **Attribute binding convention** (standardize across all shaders):
 - attrib 0: position (`aPosition`)
@@ -156,7 +205,7 @@ This is a large project structured into 7 phases. Each phase is independently bu
 - `neo/renderer/draw_common.cpp` — `RB_StencilShadowPass()`: under `#ifdef GLES2_BACKEND`:
   - Remove `qglActiveStencilFaceEXT` / `qglDepthBoundsEXT` calls
   - Use `glStencilFuncSeparate(GL_FRONT, ...)` + `glStencilOpSeparate(GL_BACK, ...)` (these are core GLES2)
-  - Bind `shadow.vert` GLSL program (from Phase 3) instead of ARB vertex program
+  - Bind the translated shadow vertex program (from Phase 3) instead of ARB vertex program
   - Disable depth bounds optimization (accept minor performance regression)
 - `neo/renderer/draw_gles2.cpp` — implement `RB_GLES2_StencilShadowPass()`
 
@@ -178,7 +227,7 @@ This is a large project structured into 7 phases. Each phase is independently bu
 - `glLineWidth`: available but behavior may differ; acceptable
 - `glReadPixels`: available in GLES2 (limited formats) — screenshot code may need format adjustment
 - **ImGui**: swap to `imgui_impl_opengl3.cpp` compiled with `IMGUI_IMPL_OPENGL_ES2` define; add `#define IMGUI_IMPL_OPENGL_ES2` before include in the GLES2 CMake path
-- **Gamma/brightness**: ARB programs apply gamma in the shader; replicate with `uGammaBrightness` uniform in all GLES2 fragment shaders
+- **Gamma/brightness**: dhewm3's gamma-in-shader hack patches the ARB text before it reaches the translator (`draw_arb2.cpp:574`); the translator handles the patched instructions automatically — no extra work needed
 
 **Files to modify**:
 - `neo/renderer/tr_backend.cpp`
@@ -208,7 +257,7 @@ This is a large project structured into 7 phases. Each phase is independently bu
 | `neo/renderer/VertexCache.cpp` | VBO management | Core GLES2 calls |
 | `neo/sys/glimp.cpp:182` | Context creation | Add ES profile attributes |
 | **New**: `neo/renderer/draw_gles2.cpp` | GLES2 backend impl | New file |
-| **New**: `neo/renderer/gles2/*.vert/frag` | GLSL ES 1.00 shaders | New files (9 programs) |
+| **New**: `neo/renderer/arb2glsl.cpp` / `.h` | Runtime ARB→GLSL ES translator | New file; no hand-written shaders |
 
 ## Existing Utilities to Reuse
 
@@ -221,11 +270,11 @@ This is a large project structured into 7 phases. Each phase is independently bu
 ## Verification Strategy
 
 1. **Unit**: Each phase compiles with both `GLES2=OFF` (existing ARB2 path unchanged) and `GLES2=ON`
-2. **Shader validation**: Compile shaders against a GLES2 context on startup; abort with error log on failure
+2. **Shader validation**: Translator output is compiled against the GLES2 context on startup; abort with error log (including translated GLSL source) on failure
 3. **Runtime**: Run the game demo with `GLES2=ON` on a platform with GLES2 support (iOS simulator, Android emulator, or desktop via ANGLE)
 4. **Regression**: ARB2 path must pass its existing CI builds (macOS, Linux, Windows) unmodified
 5. **Progressive**: After each phase, the game should start and show incrementally more correct output (blank → geometry → textured → lit → shadowed)
 
 ## Estimated Scope
 
-~3,500–5,000 lines of new code (shaders + draw_gles2.cpp + CMake) plus ~500 lines of guarded modifications to existing files. This is a multi-week project best executed phase by phase with the ARB2 backend as a reference for correctness.
+~2,500–3,500 lines of new code (translator + draw_gles2.cpp + CMake) plus ~500 lines of guarded modifications to existing files. Eliminating hand-written GLSL reduces scope significantly and makes the shader path future-proof for mods. This is a multi-week project best executed phase by phase with the ARB2 backend as a reference for correctness.
