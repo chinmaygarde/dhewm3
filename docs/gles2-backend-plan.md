@@ -1,4 +1,6 @@
 > **Note**: This is a rough plan. It has not been reviewed for correctness or completeness, and details will change as implementation progresses.
+>
+> **Progress**: Phase 1 complete (commit `2efe8e2`). Parts of Phase 2 were pulled forward into Phase 1.
 
 # OpenGL ES 2.0 Backend Port for dhewm3
 
@@ -22,48 +24,43 @@ This is a large project structured into 7 phases. Each phase is independently bu
 
 ---
 
-### Phase 1: Build System & CMake Infrastructure
+### Phase 1: Build System & CMake Infrastructure ✅ COMPLETE (commit `2efe8e2`)
 
 **Goal**: Add a compile-time switch that selects between ARB2 and GLES2 backends without breaking the existing build.
 
-**Files to modify**:
-- `neo/CMakeLists.txt` — add `BACKEND` option (`ARB2` default, `GLES2` alternative); conditionally include `draw_arb2.cpp` vs `draw_gles2.cpp`; link against appropriate GL library (OpenGL vs GLESv2)
-- `neo/CMakePresets.json` — add `gles2-debug` and `gles2-release` presets
+**Completed**:
+- ✅ `option(GLES2 ...)` added to `neo/CMakeLists.txt`; conditionally selects `draw_gles2.cpp` over `draw_arb2.cpp` and adds `-DGLES2_BACKEND` define
+- ✅ `gles2-debug` and `gles2-release` presets added to `neo/CMakePresets.json`
+- ✅ `neo/renderer/draw_gles2.cpp` stub created with stub symbols matching existing ARB2 call sites
+- ✅ ImGui disabled for GLES2 builds (guarded in CMake; proper support deferred to Phase 7)
+- ✅ `neo/sys/gles2_shim/GLES2/gl2.h` added for platforms lacking system GLES2 headers (macOS desktop); redirects to SDL's bundled definitions
+- ✅ No `libGLESv2` linkage — all proc resolution via `SDL_GL_GetProcAddress` instead (better than originally planned)
 
-**New files**:
-- `neo/renderer/draw_gles2.cpp` — stub (empty functions) initially; fills in over later phases
-- `neo/renderer/gles2/` — directory for GLSL shader source files
+**Also pulled forward from Phase 2**:
+- ✅ `neo/renderer/qgl_proc_es2.h` — full GLES2 core proc list using the `QGLPROC` macro pattern
+- ✅ `neo/renderer/qgl.h` — GLES2 section added; `qgl_proc_es2.h` declarations included under `#ifdef GLES2_BACKEND`
+- ✅ `neo/renderer/RenderSystem_init.cpp` — proc loading split: `qgl_proc.h` loaded silently (desktop-only nulls OK on GLES2), `qgl_proc_es2.h` loaded with fatal checks
+- ✅ `neo/sys/glimp.cpp` — `SDL_GL_CONTEXT_PROFILE_ES` + version 2.0 set when `GLES2_BACKEND` defined
 
-**Actions**:
-1. Add `option(GLES2 "Build with OpenGL ES 2.0 backend" OFF)` to CMakeLists
-2. When `GLES2=ON`: replace `draw_arb2.cpp` with `draw_gles2.cpp`, add `-DGLES2_BACKEND` define, find and link `libGLESv2`, include `GLES2/gl2.h` instead of SDL's OpenGL headers
-3. When `GLES2=OFF` (default): existing build is unchanged
-4. Guard ImGui with `#ifndef GLES2_BACKEND` in CMake; add `imgui_impl_opengl3.cpp` with `#define IMGUI_IMPL_OPENGL_ES2` for GLES2 path
-
-**Verification**: `cmake --preset debug` still builds and runs. `cmake -DGLES2=ON` compiles without errors (link failures expected until Phase 2+).
+**Verification**: Both `cmake --preset debug` (ARB2) and `cmake --preset gles2-debug` build cleanly.
 
 ---
 
-### Phase 2: GL Context & Function Pointer Layer
+### Phase 2: GL Context & Function Pointer Layer (partially complete)
 
-**Goal**: Create GLES2-aware context initialization and a parallel `qgl` dispatch layer.
+**Goal**: Create GLES2-aware context initialization, capability detection, and backend selection.
 
-**Files to modify**:
-- `neo/renderer/qgl.h` — wrap existing declarations in `#ifndef GLES2_BACKEND`; add new section that includes `<GLES2/gl2.h>` and `<GLES2/gl2ext.h>`, defines `GLES2_BACKEND`-specific `qgl` aliases (most GLES2 functions are core, not extension pointers)
-- `neo/renderer/qgl_proc.h` — guard with `#ifndef GLES2_BACKEND`; create `neo/renderer/qgl_proc_es2.h` for GLES2 function list (subset of GL, different extension names)
-- `neo/renderer/RenderSystem.h` — add to `glconfig_t`: `bool isGLES2`, `bool oes_packed_depth_stencil`, `bool oes_depth_texture`, `bool ext_texture_compression_s3tc` (ES equivalents)
-- `neo/renderer/RenderSystem_init.cpp` — add `#ifdef GLES2_BACKEND` block in `R_CheckPortableExtensions()` that checks OES/EXT extensions instead of ARB ones; populate `glConfig.isGLES2 = true`
-- `neo/sys/glimp.cpp` — in `GLimp_Init()`, when `GLES2_BACKEND` defined, add before SDL window creation:
-  ```cpp
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
-  ```
+**Already done (pulled into Phase 1)**:
+- ✅ `neo/renderer/qgl_proc_es2.h` created
+- ✅ `neo/renderer/qgl.h` GLES2 section added
+- ✅ `neo/renderer/RenderSystem_init.cpp` proc loading split
+- ✅ `neo/sys/glimp.cpp` ES context profile attributes
+
+**Remaining**:
+- `neo/renderer/RenderSystem.h` — add to `glconfig_t`: `bool isGLES2`, `bool oes_packed_depth_stencil`, `bool oes_depth_texture`, `bool ext_texture_compression_s3tc`
+- `neo/renderer/RenderSystem_init.cpp` — add `#ifdef GLES2_BACKEND` block in `R_CheckPortableExtensions()` to check OES/EXT extensions and set `glConfig.isGLES2 = true`
 - `neo/renderer/tr_local.h:676` — add `BE_GLES2` to `backEndName_t`
 - `neo/renderer/RenderSystem.cpp:523` — in `SetBackEndRenderer()`, add GLES2 branch: check `glConfig.isGLES2`, set `tr.backEndRenderer = BE_GLES2`, call `R_GLES2_Init()`
-
-**New files**:
-- `neo/renderer/qgl_proc_es2.h` — GLES2 function declarations using same macro pattern
 
 **Verification**: Application starts and creates a GLES2 context; `glGetString(GL_VERSION)` returns an ES string. Blank screen is acceptable.
 
