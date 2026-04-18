@@ -1,6 +1,6 @@
 > **Note**: This is a rough plan. It has not been reviewed for correctness or completeness, and details will change as implementation progresses.
 >
-> **Progress**: Phase 1 complete (commit `2efe8e2`). Parts of Phase 2 were pulled forward into Phase 1.
+> **Progress**: Phase 1 complete (commit `2efe8e2`). Phase 2 complete (commit `8aa8146`). Phase 3 complete (commit `8aa8146`).
 
 # OpenGL ES 2.0 Backend Port for dhewm3
 
@@ -46,107 +46,47 @@ This is a large project structured into 7 phases. Each phase is independently bu
 
 ---
 
-### Phase 2: GL Context & Function Pointer Layer (partially complete)
+### Phase 2: GL Context & Function Pointer Layer ✅ COMPLETE (commit `8aa8146`)
 
 **Goal**: Create GLES2-aware context initialization, capability detection, and backend selection.
 
-**Already done (pulled into Phase 1)**:
-- ✅ `neo/renderer/qgl_proc_es2.h` created
-- ✅ `neo/renderer/qgl.h` GLES2 section added
-- ✅ `neo/renderer/RenderSystem_init.cpp` proc loading split
-- ✅ `neo/sys/glimp.cpp` ES context profile attributes
-
-**Remaining**:
-- `neo/renderer/RenderSystem.h` — add to `glconfig_t`: `bool isGLES2`, `bool oes_packed_depth_stencil`, `bool oes_depth_texture`, `bool ext_texture_compression_s3tc`
-- `neo/renderer/RenderSystem_init.cpp` — add `#ifdef GLES2_BACKEND` block in `R_CheckPortableExtensions()` to check OES/EXT extensions and set `glConfig.isGLES2 = true`
-- `neo/renderer/tr_local.h:676` — add `BE_GLES2` to `backEndName_t`
-- `neo/renderer/RenderSystem.cpp:523` — in `SetBackEndRenderer()`, add GLES2 branch: check `glConfig.isGLES2`, set `tr.backEndRenderer = BE_GLES2`, call `R_GLES2_Init()`
+**Completed**:
+- ✅ `neo/renderer/qgl_proc_es2.h` created (pulled into Phase 1)
+- ✅ `neo/renderer/qgl.h` GLES2 section added (pulled into Phase 1)
+- ✅ `neo/renderer/RenderSystem_init.cpp` proc loading split (pulled into Phase 1)
+- ✅ `neo/sys/glimp.cpp` ES context profile attributes (pulled into Phase 1)
+- ✅ `neo/renderer/RenderSystem.h` — `glconfig_t` extended with `isGLES2`, `oes_packed_depth_stencil`, `oes_depth_texture`, `ext_texture_compression_s3tc`
+- ✅ `neo/renderer/RenderSystem_init.cpp` — `R_CheckPortableExtensions()` detects OES/EXT extensions and sets `glConfig.isGLES2 = true`
+- ✅ `neo/renderer/tr_local.h` — `BE_GLES2` added to `backEndName_t`
+- ✅ `neo/renderer/RenderSystem.cpp` — `SetBackEndRenderer()` routes to `BE_GLES2` when `glConfig.isGLES2` is set (primary + fallback + switch case)
 
 **Verification**: Application starts and creates a GLES2 context; `glGetString(GL_VERSION)` returns an ES string. Blank screen is acceptable.
 
 ---
 
-### Phase 3: Runtime ARB→GLSL ES Translator
+### Phase 3: Runtime ARB→GLSL ES Translator ✅ COMPLETE (commit `8aa8146`)
 
 **Goal**: Translate ARB assembly programs to GLSL ES 1.00 at runtime so the existing `.vfp` game data is reused directly. No hand-written GLSL shader files.
 
-**Rationale**: The `.vfp` files are plain-text ARB assembly loaded from pak files at runtime via `R_LoadARBProgram` (`draw_arb2.cpp:495`). The format is a highly regular RISC instruction set with no control flow. Under `GLES2_BACKEND`, the same text is intercepted after `fileSystem->ReadFile` returns it and before it is submitted to GL, translated to GLSL ES 1.00, then compiled via `glCreateShader`/`glShaderSource`. This approach automatically handles all current shaders, the inline soft-particle shader, and any mod-supplied `.vfp` files.
+**Completed**:
+- ✅ `neo/renderer/arb2glsl.h` — public interface: `ARB2GLSL_Translate(arbSrc, isFragment, outGLSL)`
+- ✅ `neo/renderer/arb2glsl.cpp` — self-contained two-pass translator, no external dependencies:
+  - First pass collects `TEMP` registers, `PARAM` literals/aliases, vertex attribute usage, varying outputs, and `texture[N]` samplers
+  - Second pass translates instructions one-to-one: `MOV ADD SUB MUL MAD DP3 DP4 DPH RCP RSQ POW EXP LOG MIN MAX ABS FRC FLR CMP LRP SLT SGE XPD TEX TXP` plus `_SAT` variants (wrapped in `clamp()`)
+  - Bare numeric literals wrapped in `vec4()` to satisfy GLSL ES 1.00 type rules
+  - `OPTION ARB_position_invariant` emits `uMVP` uniform + `gl_Position = uMVP * aPosition;` epilogue
+  - `PARAM name = {a,b,c,d}` → `const vec4`; `PARAM name = program.env[N]` → alias to `uProgramEnv[N]`
+  - Swizzles and write masks pass through verbatim (identical syntax in GLSL)
+- ✅ `neo/renderer/draw_gles2.cpp` — full program management replacing Phase 1 stubs:
+  - `ApplyGammaHack()` — reproduces `draw_arb2.cpp:574` logic; translator receives already-patched ARB text so `dhewm3tmpres` is treated as a plain TEMP
+  - `R_GLES2_CompileGLSL` / `R_GLES2_LinkProgram` with full GLSL compiler/linker error logging
+  - `R_GLES2_InitPrograms()` — loads all `.vfp` files, applies gamma hack, translates, compiles, pairs vertex+fragment by filename, links with fixed attribute locations, resolves `uProgramEnv` / `uMVP` / `uTexN` uniform locations
+  - `R_ReloadARBPrograms_f` — deletes and rebuilds all linked programs
+  - `GLES2_SetProgramEnv()` — CPU-side mirror of `program.env[]` for Phase 4 upload
+  - Fixed attribute locations bound before link: `aPosition`=0, `aTexCoord0`=1, `aTexCoord1`=2, `aNormal`=3, `aTangent`=4, `aBitangent`=5, `aColor`=6
+- ✅ `neo/CMakeLists.txt` — `arb2glsl.cpp` added to GLES2 source list
 
-**Hook point**: `draw_arb2.cpp:521` — `buffer` holds the full shader text as a C string. Under `GLES2_BACKEND`, `R_LoadARBProgram` calls the translator instead of `glProgramStringARB`.
-
-**New file**: `neo/renderer/arb2glsl.cpp` (+ `arb2glsl.h`) — self-contained translator, no external dependencies.
-
-**Translator responsibilities**:
-
-1. **Detect program type** from magic header: `!!ARBvp1.0` → vertex shader, `!!ARBfp1.0` → fragment shader.
-
-2. **First pass — collect declarations**: scan all instructions to find:
-   - All `TEMP` register names → emit `vec4 name;` locals
-   - All `program.env[N]` indices referenced → emit `uniform vec4 uProgramEnv[MAXN];`
-   - All `vertex.*` inputs referenced → emit `attribute vec4 aName;`
-   - All `result.texcoord[N]` (VP) / `fragment.texcoord[N]` (FP) → emit matching `varying vec4 vTexCoordN;`
-   - All `texture[N]` samplers → emit `uniform sampler2D uTexN;`
-   - `OPTION ARB_position_invariant` present → note that VP must write `gl_Position`
-
-3. **Emit preamble**:
-   ```glsl
-   precision mediump float;
-   // ... collected uniforms, attributes, varyings ...
-   void main() {
-   ```
-
-4. **Second pass — translate instructions** one-to-one:
-
-   | ARB instruction | GLSL ES emission |
-   |---|---|
-   | `MOV dst, src` | `dst = src;` |
-   | `ADD dst, a, b` | `dst = a + b;` |
-   | `MUL dst, a, b` | `dst = a * b;` |
-   | `MAD dst, a, b, c` | `dst = a * b + c;` |
-   | `DP3 dst, a, b` | `dst = vec4(dot(a.xyz, b.xyz));` |
-   | `DP4 dst, a, b` | `dst = vec4(dot(a, b));` |
-   | `RCP dst, src` | `dst = vec4(1.0 / src.x);` |
-   | `RSQ dst, src` | `dst = vec4(inversesqrt(src.x));` |
-   | `POW dst, a, b` | `dst = vec4(pow(a.x, b.x));` |
-   | `MIN dst, a, b` | `dst = min(a, b);` |
-   | `MAX dst, a, b` | `dst = max(a, b);` |
-   | `ABS dst, src` | `dst = abs(src);` |
-   | `FRC dst, src` | `dst = fract(src);` |
-   | `FLR dst, src` | `dst = floor(src);` |
-   | `CMP dst, c, a, b` | `dst = mix(a, b, step(0.0, c));` (component-wise) |
-   | `TEX dst, coord, texture[N], 2D` | `dst = texture2D(uTexN, coord.xy);` |
-   | `TXP dst, coord, texture[N], 2D` | `dst = texture2DProj(uTexN, coord.xyw);` |
-   | `MUL_SAT dst, a, b` | `dst = clamp(a * b, 0.0, 1.0);` |
-   | `result.color` (FP) | `gl_FragColor` |
-   | `result.position` (VP) | `gl_Position` |
-   | `OPTION ARB_position_invariant` | emit `gl_Position = uMVP * aPosition;` at end of VP |
-
-5. **Swizzle and write-mask passthrough**: `.xyzw`, `.xyz`, `.xy`, `.x` etc. are identical syntax in GLSL — emit verbatim.
-
-6. **`PARAM` constants**: `PARAM name = {a, b, c, d}` → `const vec4 name = vec4(a, b, c, d);` in preamble. `PARAM name = program.env[N]` → alias resolved at reference sites to `uProgramEnv[N]`.
-
-7. **Gamma hack compatibility**: dhewm3's `r_gammaInShader` path (`draw_arb2.cpp:574`) patches the ARB text before submission. The translator receives the already-patched string, so `dhewm3tmpres` is just another `TEMP` register and the injected `MUL_SAT`/`POW`/`MOV` instructions translate normally. `result.color` → `gl_FragColor` renaming is handled by the normal output register mapping.
-
-8. **`GLES2_BACKEND`-only fixed-function replacements**: Two small hand-written GLSL ES programs are needed for draw calls that have no ARB counterpart (fixed-function colored and textured draws in `tr_rendertools.cpp` / debug paths). These are embedded as C string literals in `draw_gles2.cpp` — not separate files. They are minimal: a color-pass pair and a texture-pass pair (~30 lines total).
-
-**New infrastructure in `draw_gles2.cpp`**:
-- `struct glesProgram_t { GLuint vert, frag, prog; GLint uProgramEnvLoc; }` — one per loaded ARB program pair
-- `R_GLES2_CompileGLSL(GLenum type, const char *src)` — `glCreateShader` + `glShaderSource` + `glCompileShader` with error logging
-- `R_GLES2_LinkProgram(GLuint vert, GLuint frag)` — `glCreateProgram` + `glAttachShader` + `glLinkProgram`
-- `R_GLES2_LoadProgram(const char *arbSrc, GLenum target)` — calls translator, then compile+link
-- `glesProgs[]` array parallel to `progs[]` in `draw_arb2.cpp`; indexed by same `progIndex`
-- `R_GLES2_Init()` — drives `R_LoadARBProgram` for all entries, validates, sets `glConfig.allowGLES2Path`
-
-**Attribute binding convention** (fixed across all translated shaders via `glBindAttribLocation` before link):
-- attrib 0: `aPosition` (`vertex.position`)
-- attrib 1: `aTexCoord0` (`vertex.texcoord[0]` / `vertex.texcoord`)
-- attrib 2: `aTexCoord1` (`vertex.texcoord[1]`)
-- attrib 3: `aNormal` (`vertex.normal`)
-- attrib 4: `aTangent` (`vertex.attrib[9]`)
-- attrib 5: `aBitangent` (`vertex.attrib[10]`)
-- attrib 6: `aColor` (`vertex.color`)
-
-**Verification**: All `.vfp` shaders translate and compile without GLSL errors on the target GLES2 context. Translated source is logged at `developer 1` verbosity for inspection.
+**Verification**: Both `cmake -DGLES2=ON` and default ARB2 builds pass cleanly. All `.vfp` shaders translate and compile without GLSL errors on startup; errors are logged with full GLSL source via `glGetShaderInfoLog`.
 
 ---
 
