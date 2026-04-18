@@ -2,7 +2,7 @@
   "version": 3,
   "configurePresets": [
     {
-      "name": "setup",
+      "name": "macos-setup",
       "hidden": true,
       "cacheVariables": {
         "OPENAL_INCLUDE_DIR": "/opt/homebrew/opt/openal-soft/include",
@@ -10,8 +10,13 @@
       }
     },
     {
+      "name": "linux-setup",
+      "hidden": true,
+      "cacheVariables": {}
+    },
+    {
       "name": "debug",
-      "inherits": "setup",
+      "inherits": "macos-setup",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/../build",
       "cacheVariables": {
@@ -20,7 +25,7 @@
     },
     {
       "name": "release",
-      "inherits": "setup",
+      "inherits": "macos-setup",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/../build/release",
       "cacheVariables": {
@@ -29,7 +34,7 @@
     },
     {
       "name": "gles2-debug",
-      "inherits": "setup",
+      "inherits": "macos-setup",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/../build/gles2",
       "cacheVariables": {
@@ -39,12 +44,30 @@
     },
     {
       "name": "gles2-release",
-      "inherits": "setup",
+      "inherits": "macos-setup",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/../build/gles2-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "GLES2": "ON"
+      }
+    },
+    {
+      "name": "linux-debug",
+      "inherits": "linux-setup",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "linux-release",
+      "inherits": "linux-setup",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
       }
     }
   ],
@@ -64,6 +87,14 @@
     {
       "name": "gles2-release",
       "configurePreset": "gles2-release"
+    },
+    {
+      "name": "linux-debug",
+      "configurePreset": "linux-debug"
+    },
+    {
+      "name": "linux-release",
+      "configurePreset": "linux-release"
     }
   ],
   "testPresets": [

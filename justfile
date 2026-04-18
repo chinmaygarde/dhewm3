@@ -1,5 +1,7 @@
+_preset := if os() == "macos" { "debug" } else { "linux-debug" }
+
 gen:
-  cmake -S neo --preset debug
+  cmake -S neo --preset {{ _preset }}
 
 build: gen
   cmake --build build
@@ -17,7 +19,13 @@ assets:
   rm build/doom3REbase.zip
 
 run: build assets
-  open build/dhewm3.app
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [ "{{ os() }}" = "macos" ]; then
+    open build/dhewm3.app
+  else
+    build/dhewm3
+  fi
 
 clean:
   rm -rf build
