@@ -665,6 +665,7 @@ set(src_renderer
 
 if(GLES2)
 	list(APPEND src_renderer renderer/draw_gles2.cpp)
+	list(APPEND src_renderer renderer/arb2glsl.cpp)
 else()
 	list(APPEND src_renderer renderer/draw_arb2.cpp)
 endif()

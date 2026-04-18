@@ -595,6 +595,15 @@ static void R_CheckPortableExtensions( void ) {
 			common->Printf( "X..GL_ARB_debug_output not found\n" );
 		}
 	}
+
+#ifdef GLES2_BACKEND
+	glConfig.isGLES2 = true;
+	glConfig.oes_packed_depth_stencil    = R_CheckExtension( "GL_OES_packed_depth_stencil" );
+	glConfig.oes_depth_texture           = R_CheckExtension( "GL_OES_depth_texture" );
+	glConfig.ext_texture_compression_s3tc =
+		R_CheckExtension( "GL_EXT_texture_compression_s3tc" ) ||
+		R_CheckExtension( "GL_WEBGL_compressed_texture_s3tc" );
+#endif
 }
 
 

@@ -99,6 +99,13 @@ typedef struct glconfig_s {
 
 	bool				haveDebugContext;
 
+#ifdef GLES2_BACKEND
+	bool				isGLES2;
+	bool				oes_packed_depth_stencil;
+	bool				oes_depth_texture;
+	bool				ext_texture_compression_s3tc;
+#endif
+
 	// For some reason people decided that we need displays with ultra small pixels,
 	// so everything rendered on them must be scaled up to be legible.
 	// unfortunately, this bullshit feature was "improved" upon by deciding that the best

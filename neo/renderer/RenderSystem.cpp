@@ -529,15 +529,27 @@ void idRenderSystemLocal::SetBackEndRenderer() {
 
 	backEndRenderer = BE_BAD;
 
-	if ( idStr::Icmp( r_renderer.GetString(), "arb2" ) == 0 ) {
-		if ( glConfig.allowARB2Path ) {
-			backEndRenderer = BE_ARB2;
+#ifdef GLES2_BACKEND
+	if ( glConfig.isGLES2 ) {
+		backEndRenderer = BE_GLES2;
+	}
+#endif
+
+	if ( backEndRenderer == BE_BAD ) {
+		if ( idStr::Icmp( r_renderer.GetString(), "arb2" ) == 0 ) {
+			if ( glConfig.allowARB2Path ) {
+				backEndRenderer = BE_ARB2;
+			}
 		}
 	}
 
 	// fallback
 	if ( backEndRenderer == BE_BAD ) {
-		// choose the best
+#ifdef GLES2_BACKEND
+		if ( glConfig.isGLES2 ) {
+			backEndRenderer = BE_GLES2;
+		} else
+#endif
 		if ( glConfig.allowARB2Path ) {
 			backEndRenderer = BE_ARB2;
 		}
@@ -552,6 +564,13 @@ void idRenderSystemLocal::SetBackEndRenderer() {
 		backEndRendererHasVertexPrograms = true;
 		backEndRendererMaxLight = 999;
 		break;
+#ifdef GLES2_BACKEND
+	case BE_GLES2:
+		common->Printf( "using GLES2 renderSystem\n" );
+		backEndRendererHasVertexPrograms = true;
+		backEndRendererMaxLight = 999;
+		break;
+#endif
 	default:
 		common->FatalError( "SetbackEndRenderer: bad back end" );
 	}
