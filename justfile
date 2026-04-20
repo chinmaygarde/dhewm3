@@ -1,4 +1,5 @@
 _preset := if os() == "macos" { "debug" } else { "linux-debug" }
+_gles3_preset := if os() == "macos" { "gles3-debug" } else { "linux-gles3-debug" }
 
 gen:
   cmake -S neo --preset {{ _preset }}
@@ -17,6 +18,21 @@ assets:
   gcloud storage cp gs://private.chinmaygarde.com/Archive/doom3REbase.zip build/doom3REbase.zip
   unzip -o build/doom3REbase.zip -d build/
   rm build/doom3REbase.zip
+
+gen-gles3:
+  cmake -S neo --preset {{ _gles3_preset }}
+
+build-gles3: gen-gles3
+  cmake --build build/gles3
+
+run-gles3: build-gles3 assets
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [ "{{ os() }}" = "macos" ]; then
+    open build/gles3/dhewm3.app
+  else
+    build/gles3/dhewm3 +set fs_basepath build/
+  fi
 
 run: build assets
   #!/usr/bin/env bash

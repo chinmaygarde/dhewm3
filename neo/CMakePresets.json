@@ -53,6 +53,16 @@
       }
     },
     {
+      "name": "linux-gles3-debug",
+      "inherits": "linux-setup",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../build/gles3",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "GLES3": "ON"
+      }
+    },
+    {
       "name": "linux-debug",
       "inherits": "linux-setup",
       "generator": "Ninja",
@@ -87,6 +97,10 @@
     {
       "name": "gles3-release",
       "configurePreset": "gles3-release"
+    },
+    {
+      "name": "linux-gles3-debug",
+      "configurePreset": "linux-gles3-debug"
     },
     {
       "name": "linux-debug",

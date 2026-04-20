@@ -398,6 +398,95 @@ R_CheckPortableExtensions
 static void R_CheckPortableExtensions( void ) {
 	glConfig.glVersion = atof( glConfig.version_string );
 
+#ifdef GLES3_BACKEND
+	// GLES3 version string is "OpenGL ES M.m ..." — atof() above returns 0.0.
+	{
+		const char *es = strstr( glConfig.version_string, "OpenGL ES " );
+		if ( es )
+			glConfig.glVersion = atof( es + 10 );
+	}
+
+	glConfig.isGLES3 = true;
+
+	// Multitexture is core in GLES2+ (glActiveTexture is always available).
+	glConfig.multitextureAvailable = true;
+	qglActiveTextureARB = (void(APIENTRY *)(GLenum))GLimp_ExtensionPointer( "glActiveTexture" );
+	qglGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, (GLint *)&glConfig.maxTextureImageUnits );
+	glConfig.maxTextureUnits = glConfig.maxTextureImageUnits;
+	if ( glConfig.maxTextureUnits > MAX_MULTITEXTURE_UNITS )
+		glConfig.maxTextureUnits = MAX_MULTITEXTURE_UNITS;
+	glConfig.maxTextureCoords = glConfig.maxTextureImageUnits;
+
+	// Fixed-function extension flags: set true so the minimum-set check passes.
+	// The GLES3 draw path uses shaders and never calls the fixed-function entry points.
+	glConfig.textureEnvCombineAvailable = true;
+	glConfig.cubeMapAvailable           = true;
+	glConfig.envDot3Available           = true;
+	glConfig.textureEnvAddAvailable     = true;
+
+	// Non-power-of-two textures are core in GLES3.
+	glConfig.textureNonPowerOfTwoAvailable = true;
+
+	// S3TC compressed textures via extension.
+	glConfig.ext_texture_compression_s3tc =
+		R_CheckExtension( "GL_EXT_texture_compression_s3tc" ) ||
+		R_CheckExtension( "GL_WEBGL_compressed_texture_s3tc" );
+	if ( glConfig.ext_texture_compression_s3tc ) {
+		glConfig.textureCompressionAvailable = true;
+		qglCompressedTexImage2DARB = (PFNGLCOMPRESSEDTEXIMAGE2DARBPROC)GLimp_ExtensionPointer( "glCompressedTexImage2D" );
+		qglGetCompressedTexImageARB = NULL; // not available in GLES3
+	} else {
+		glConfig.textureCompressionAvailable     = false;
+		glConfig.bptcTextureCompressionAvailable = false;
+	}
+
+	// Anisotropic filtering (extension; same string as desktop GL).
+	glConfig.anisotropicAvailable = R_CheckExtension( "GL_EXT_texture_filter_anisotropic" );
+	if ( glConfig.anisotropicAvailable ) {
+		qglGetFloatv( GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &glConfig.maxTextureAnisotropy );
+		common->Printf( "   maxTextureAnisotropy: %g\n", glConfig.maxTextureAnisotropy );
+	} else {
+		glConfig.maxTextureAnisotropy = 1;
+	}
+
+	// LOD bias is core in GLES3.
+	glConfig.textureLODBiasAvailable = true;
+	common->Printf( "...using %s\n", "GL_1.4_texture_lod_bias" );
+
+	// GL_INCR_WRAP / GL_DECR_WRAP are core in GLES2+.
+	tr.stencilIncr = GL_INCR_WRAP_EXT;
+	tr.stencilDecr = GL_DECR_WRAP_EXT;
+
+	// glStencilOpSeparate is core in GLES2+.
+	qglStencilOpSeparate = (PFNGLSTENCILOPSEPARATEPROC)GLimp_ExtensionPointer( "glStencilOpSeparate" );
+	if ( qglStencilOpSeparate )
+		common->Printf( "...got GLES3 core glStencilOpSeparate()\n" );
+
+	// VBOs are core in GLES2+ — alias ARB function pointers to their core names.
+	glConfig.ARBVertexBufferObjectAvailable = true;
+	qglBindBufferARB           = (PFNGLBINDBUFFERARBPROC)GLimp_ExtensionPointer( "glBindBuffer" );
+	qglDeleteBuffersARB        = (PFNGLDELETEBUFFERSARBPROC)GLimp_ExtensionPointer( "glDeleteBuffers" );
+	qglGenBuffersARB           = (PFNGLGENBUFFERSARBPROC)GLimp_ExtensionPointer( "glGenBuffers" );
+	qglIsBufferARB             = (PFNGLISBUFFERARBPROC)GLimp_ExtensionPointer( "glIsBuffer" );
+	qglBufferDataARB           = (PFNGLBUFFERDATAARBPROC)GLimp_ExtensionPointer( "glBufferData" );
+	qglBufferSubDataARB        = (PFNGLBUFFERSUBDATAARBPROC)GLimp_ExtensionPointer( "glBufferSubData" );
+	qglGetBufferParameterivARB = (PFNGLGETBUFFERPARAMETERIVARBPROC)GLimp_ExtensionPointer( "glGetBufferParameteriv" );
+	// glGetBufferSubData, glMapBuffer, glGetBufferPointerv are absent in GLES3.
+	qglGetBufferSubDataARB  = NULL;
+	qglMapBufferARB         = NULL;
+	qglUnmapBufferARB       = (PFNGLUNMAPBUFFERARBPROC)GLimp_ExtensionPointer( "glUnmapBuffer" );
+	qglGetBufferPointervARB = NULL;
+
+	// ARB vertex/fragment programs don't exist in GLES3; GLSL ES is used instead.
+	glConfig.ARBVertexProgramAvailable   = false;
+	glConfig.ARBFragmentProgramAvailable = false;
+
+	glConfig.depthBoundsTestAvailable = false;
+	glConfig.glDebugOutputAvailable   = false;
+
+	return;
+#endif /* GLES3_BACKEND */
+
 	// GL_ARB_multitexture
 	glConfig.multitextureAvailable = R_CheckExtension( "GL_ARB_multitexture" );
 	if ( glConfig.multitextureAvailable ) {
@@ -596,12 +685,6 @@ static void R_CheckPortableExtensions( void ) {
 		}
 	}
 
-#ifdef GLES3_BACKEND
-	glConfig.isGLES3 = true;
-	glConfig.ext_texture_compression_s3tc =
-		R_CheckExtension( "GL_EXT_texture_compression_s3tc" ) ||
-		R_CheckExtension( "GL_WEBGL_compressed_texture_s3tc" );
-#endif
 }
 
 

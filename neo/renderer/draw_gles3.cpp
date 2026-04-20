@@ -247,7 +247,7 @@ static char *ApplyGammaHack( const char *src ) {
 	while ( *insertPos && *insertPos != '\n' && *insertPos != '\r' ) insertPos++;
 	while ( *insertPos == '\n' || *insertPos == '\r' ) insertPos++;
 
-	const char *endInOrig = start + ( end - tmp );
+	const char *endInOrig = end;
 	const char *insertPosInOrig = start + ( insertPos - tmp );
 	delete[] tmp;
 
