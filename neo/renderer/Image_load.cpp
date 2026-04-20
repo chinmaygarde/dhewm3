@@ -294,7 +294,11 @@ GLenum idImage::SelectInternalFormat( const byte **dataPtrs, int numDataPtrs, in
 		if ( glConfig.textureCompressionAvailable ) {
 			return useBC7compression ? GL_COMPRESSED_RGBA_BPTC_UNORM : GL_COMPRESSED_RGB_S3TC_DXT1_EXT;
 		} else {
+#ifndef GLES3_BACKEND
 			return GL_RGB5;
+#else
+			return GL_RGB8;
+#endif
 		}
 	}
 	if ( minimumDepth == TD_DIFFUSE ) {
@@ -309,7 +313,11 @@ GLenum idImage::SelectInternalFormat( const byte **dataPtrs, int numDataPtrs, in
 				return GL_COMPRESSED_RGBA_S3TC_DXT3_EXT;
 			}
 		} else if ( ( aAnd == 255 || aOr == 0 ) ) {
+#ifndef GLES3_BACKEND
 			return GL_RGB5;
+#else
+			return GL_RGB8;
+#endif
 		} else {
 			return GL_RGBA4;
 		}
@@ -335,7 +343,11 @@ GLenum idImage::SelectInternalFormat( const byte **dataPtrs, int numDataPtrs, in
 			return useBC7compression ? GL_COMPRESSED_RGBA_BPTC_UNORM    // 1byte/pixel
 			                         : GL_COMPRESSED_RGB_S3TC_DXT1_EXT; // half byte
 		}
+#ifndef GLES3_BACKEND
 		return GL_RGB5;			// two bytes
+#else
+		return GL_RGB8;
+#endif
 	}
 
 	// cases with alpha
@@ -343,7 +355,11 @@ GLenum idImage::SelectInternalFormat( const byte **dataPtrs, int numDataPtrs, in
 		if ( minimumDepth != TD_HIGH_QUALITY && glConfig.textureCompressionAvailable ) {
 			return useBC7compression ? GL_COMPRESSED_RGBA_BPTC_UNORM : GL_COMPRESSED_RGBA_S3TC_DXT3_EXT; // one byte
 		}
+#ifndef GLES3_BACKEND
 		return GL_INTENSITY8;	// single byte for all channels
+#else
+		return GL_RGB8;
+#endif
 	}
 
 #if 0
@@ -363,7 +379,11 @@ GLenum idImage::SelectInternalFormat( const byte **dataPtrs, int numDataPtrs, in
 		return useBC7compression ? GL_COMPRESSED_RGBA_BPTC_UNORM : GL_COMPRESSED_RGBA_S3TC_DXT3_EXT; // one byte
 	}
 	if ( !rgbDiffer ) {
+#ifndef GLES3_BACKEND
 		return GL_LUMINANCE8_ALPHA8;	// two bytes, max quality
+#else
+		return GL_RGBA8;
+#endif
 	}
 	return GL_RGBA4;	// two bytes
 }

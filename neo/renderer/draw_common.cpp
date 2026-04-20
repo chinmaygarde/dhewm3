@@ -94,6 +94,7 @@ void RB_PrepareStageTexturing( const shaderStage_t *pStage,  const drawSurf_t *s
 	}
 
 	// texgens
+#ifndef GLES3_BACKEND
 	if ( pStage->texture.texgen == TG_DIFFUSE_CUBE ) {
 		qglTexCoordPointer( 3, GL_FLOAT, sizeof( idDrawVert ), ac->normal.ToFloatPtr() );
 	}
@@ -247,6 +248,7 @@ void RB_PrepareStageTexturing( const shaderStage_t *pStage,  const drawSurf_t *s
 			qglMatrixMode( GL_MODELVIEW );
 		}
 	}
+#endif // !GLES3_BACKEND
 }
 
 /*
@@ -260,6 +262,7 @@ void RB_FinishStageTexturing( const shaderStage_t *pStage, const drawSurf_t *sur
 		qglDisable( GL_POLYGON_OFFSET_FILL );
 	}
 
+#ifndef GLES3_BACKEND
 	if ( pStage->texture.texgen == TG_DIFFUSE_CUBE || pStage->texture.texgen == TG_SKYBOX_CUBE
 		|| pStage->texture.texgen == TG_WOBBLESKY_CUBE ) {
 		qglTexCoordPointer( 2, GL_FLOAT, sizeof( idDrawVert ), (void *)&ac->st );
@@ -335,6 +338,7 @@ void RB_FinishStageTexturing( const shaderStage_t *pStage, const drawSurf_t *sur
 		qglLoadIdentity();
 		qglMatrixMode( GL_MODELVIEW );
 	}
+#endif // !GLES3_BACKEND
 }
 
 /*
