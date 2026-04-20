@@ -99,10 +99,8 @@ typedef struct glconfig_s {
 
 	bool				haveDebugContext;
 
-#ifdef GLES2_BACKEND
-	bool				isGLES2;
-	bool				oes_packed_depth_stencil;
-	bool				oes_depth_texture;
+#ifdef GLES3_BACKEND
+	bool				isGLES3;
 	bool				ext_texture_compression_s3tc;
 #endif
 

@@ -30,8 +30,8 @@ If you have questions concerning this license or the applicable additional terms
 ** ARB2GLSL.CPP
 **
 ** Runtime translator from ARB assembly vertex/fragment programs to
-** GLSL ES 1.00 source.  The engine loads .vfp files as plain text and
-** passes them through here before handing them to the GLES2 driver.
+** GLSL ES 3.00 source.  The engine loads .vfp files as plain text and
+** passes them through here before handing them to the GLES3 driver.
 ** This means all existing .vfp data (including mods) is reused without
 ** hand-written GLSL.
 */
@@ -43,7 +43,7 @@ If you have questions concerning this license or the applicable additional terms
 
 #include "renderer/arb2glsl.h"
 
-#ifdef GLES2_BACKEND
+#ifdef GLES3_BACKEND
 
 // ---------------------------------------------------------------------------
 // Internal data structures — reset at the start of every Translate call
@@ -293,7 +293,7 @@ static idStr TranslateOperand( const char *arb ) {
 		glsl = "gl_Position";
 		glsl += swizzle;
 	} else if ( idStr::Icmp( base.c_str(), "result.color" ) == 0 ) {
-		glsl = "gl_FragColor";
+		glsl = "fragColor";
 		glsl += swizzle;
 	} else if ( idStr::Icmpn( base.c_str(), "result.texcoord", 15 ) == 0 ) {
 		// result.texcoord or result.texcoord[N]
@@ -586,7 +586,7 @@ static void TranslateInstruction( const char *line, bool isFragment, idStr &body
 		p = SkipCommaOrWhitespace( p );
 		idStr typeTok; p = ReadToken( p, typeTok );
 		char ubuf[16]; idStr::snPrintf( ubuf, sizeof(ubuf), "uTex%d", unit );
-		body += "    "; body += dst; body += " = texture2D("; body += ubuf;
+		body += "    "; body += dst; body += " = texture("; body += ubuf;
 		body += ", vec2("; body += coord; body += "));\n";
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "TXP" ) == 0 ) {
@@ -603,7 +603,7 @@ static void TranslateInstruction( const char *line, bool isFragment, idStr &body
 		p = SkipCommaOrWhitespace( p );
 		idStr typeTok; p = ReadToken( p, typeTok );
 		char ubuf[16]; idStr::snPrintf( ubuf, sizeof(ubuf), "uTex%d", unit );
-		body += "    "; body += dst; body += " = texture2DProj("; body += ubuf;
+		body += "    "; body += dst; body += " = textureProj("; body += ubuf;
 		body += ", vec3("; body += coord; body += "));\n";
 
 	} else {
@@ -794,8 +794,8 @@ bool ARB2GLSL_Translate( const char *arbSrc, bool isFragment, idStr &outGLSL ) {
 	// Emit preamble
 	// -----------------------------------------------------------------------
 	idStr out;
-	out += "#version 100\n";
-	out += "precision mediump float;\n\n";
+	out += "#version 300 es\n";
+	out += "precision highp float;\n\n";
 
 	// program.env uniform array
 	if ( s_maxEnvIndex >= 0 ) {
@@ -828,21 +828,23 @@ bool ARB2GLSL_Translate( const char *arbSrc, bool isFragment, idStr &outGLSL ) {
 	}
 
 	if ( !isFragment ) {
-		// Vertex shader attributes
-		if ( s_needsPosition )   out += "attribute vec4 aPosition;\n";
-		if ( s_needsTexCoord0 )  out += "attribute vec4 aTexCoord0;\n";
-		if ( s_needsTexCoord1 )  out += "attribute vec4 aTexCoord1;\n";
-		if ( s_needsNormal )     out += "attribute vec4 aNormal;\n";
-		if ( s_needsTangent )    out += "attribute vec4 aTangent;\n";
-		if ( s_needsBitangent )  out += "attribute vec4 aBitangent;\n";
-		if ( s_needsColor )      out += "attribute vec4 aColor;\n";
-		// Vertex shader outputs (varyings)
-		if ( s_writesTexCoord )  out += "varying vec4 vTexCoord0;\n";
-		if ( s_writesVaryingColor ) out += "varying vec4 vColor;\n";
+		// Vertex shader inputs
+		if ( s_needsPosition )   out += "in vec4 aPosition;\n";
+		if ( s_needsTexCoord0 )  out += "in vec4 aTexCoord0;\n";
+		if ( s_needsTexCoord1 )  out += "in vec4 aTexCoord1;\n";
+		if ( s_needsNormal )     out += "in vec4 aNormal;\n";
+		if ( s_needsTangent )    out += "in vec4 aTangent;\n";
+		if ( s_needsBitangent )  out += "in vec4 aBitangent;\n";
+		if ( s_needsColor )      out += "in vec4 aColor;\n";
+		// Vertex shader outputs
+		if ( s_writesTexCoord )  out += "out vec4 vTexCoord0;\n";
+		if ( s_writesVaryingColor ) out += "out vec4 vColor;\n";
 	} else {
-		// Fragment shader varyings (inputs from VP)
-		if ( s_needsFragTexCoord ) out += "varying vec4 vTexCoord0;\n";
-		if ( s_needsFragColor )    out += "varying vec4 vColor;\n";
+		// Fragment shader inputs from VP
+		if ( s_needsFragTexCoord ) out += "in vec4 vTexCoord0;\n";
+		if ( s_needsFragColor )    out += "in vec4 vColor;\n";
+		// Fragment output (replaces gl_FragColor in GLSL ES 3.00)
+		out += "out vec4 fragColor;\n";
 	}
 
 	out += "\nvoid main() {\n";
@@ -905,4 +907,4 @@ bool ARB2GLSL_Translate( const char *arbSrc, bool isFragment, idStr &outGLSL ) {
 	return true;
 }
 
-#endif /* GLES2_BACKEND */
+#endif /* GLES3_BACKEND */

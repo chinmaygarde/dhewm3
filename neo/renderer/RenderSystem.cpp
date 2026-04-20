@@ -529,9 +529,9 @@ void idRenderSystemLocal::SetBackEndRenderer() {
 
 	backEndRenderer = BE_BAD;
 
-#ifdef GLES2_BACKEND
-	if ( glConfig.isGLES2 ) {
-		backEndRenderer = BE_GLES2;
+#ifdef GLES3_BACKEND
+	if ( glConfig.isGLES3 ) {
+		backEndRenderer = BE_GLES3;
 	}
 #endif
 
@@ -545,9 +545,9 @@ void idRenderSystemLocal::SetBackEndRenderer() {
 
 	// fallback
 	if ( backEndRenderer == BE_BAD ) {
-#ifdef GLES2_BACKEND
-		if ( glConfig.isGLES2 ) {
-			backEndRenderer = BE_GLES2;
+#ifdef GLES3_BACKEND
+		if ( glConfig.isGLES3 ) {
+			backEndRenderer = BE_GLES3;
 		} else
 #endif
 		if ( glConfig.allowARB2Path ) {
@@ -564,9 +564,9 @@ void idRenderSystemLocal::SetBackEndRenderer() {
 		backEndRendererHasVertexPrograms = true;
 		backEndRendererMaxLight = 999;
 		break;
-#ifdef GLES2_BACKEND
-	case BE_GLES2:
-		common->Printf( "using GLES2 renderSystem\n" );
+#ifdef GLES3_BACKEND
+	case BE_GLES3:
+		common->Printf( "using GLES3 renderSystem\n" );
 		backEndRendererHasVertexPrograms = true;
 		backEndRendererMaxLight = 999;
 		break;

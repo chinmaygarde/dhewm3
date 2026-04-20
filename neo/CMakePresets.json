@@ -33,23 +33,23 @@
       }
     },
     {
-      "name": "gles2-debug",
+      "name": "gles3-debug",
       "inherits": "macos-setup",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/../build/gles2",
+      "binaryDir": "${sourceDir}/../build/gles3",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "GLES2": "ON"
+        "GLES3": "ON"
       }
     },
     {
-      "name": "gles2-release",
+      "name": "gles3-release",
       "inherits": "macos-setup",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/../build/gles2-release",
+      "binaryDir": "${sourceDir}/../build/gles3-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "GLES2": "ON"
+        "GLES3": "ON"
       }
     },
     {
@@ -81,12 +81,12 @@
       "configurePreset": "release"
     },
     {
-      "name": "gles2-debug",
-      "configurePreset": "gles2-debug"
+      "name": "gles3-debug",
+      "configurePreset": "gles3-debug"
     },
     {
-      "name": "gles2-release",
-      "configurePreset": "gles2-release"
+      "name": "gles3-release",
+      "configurePreset": "gles3-release"
     },
     {
       "name": "linux-debug",

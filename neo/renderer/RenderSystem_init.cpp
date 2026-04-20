@@ -258,10 +258,10 @@ idCVar r_glDebugContext( "r_glDebugContext", "0", CVAR_RENDERER | CVAR_BOOL, "En
 #define QGLPROC(name, rettype, args) rettype (APIENTRYP q##name) args;
 #include "renderer/qgl_proc.h"
 
-#ifdef GLES2_BACKEND
-// define GLES2-specific function pointer storage
+#ifdef GLES3_BACKEND
+// define GLES3-specific function pointer storage
 #define QGLPROC(name, rettype, args) rettype (APIENTRYP q##name) args;
-#include "renderer/qgl_proc_es2.h"
+#include "renderer/qgl_proc_es3.h"
 #endif
 
 void ( APIENTRY * qglMultiTexCoord2fARB )( GLenum texture, GLfloat s, GLfloat t );
@@ -596,10 +596,8 @@ static void R_CheckPortableExtensions( void ) {
 		}
 	}
 
-#ifdef GLES2_BACKEND
-	glConfig.isGLES2 = true;
-	glConfig.oes_packed_depth_stencil    = R_CheckExtension( "GL_OES_packed_depth_stencil" );
-	glConfig.oes_depth_texture           = R_CheckExtension( "GL_OES_depth_texture" );
+#ifdef GLES3_BACKEND
+	glConfig.isGLES3 = true;
 	glConfig.ext_texture_compression_s3tc =
 		R_CheckExtension( "GL_EXT_texture_compression_s3tc" ) ||
 		R_CheckExtension( "GL_WEBGL_compressed_texture_s3tc" );
@@ -835,7 +833,7 @@ void R_InitOpenGL( void ) {
 	}
 
 // load qgl function pointers
-#ifndef GLES2_BACKEND
+#ifndef GLES3_BACKEND
 	// Desktop GL path: all qgl_proc.h functions are required.
 	#define QGLPROC(name, rettype, args) \
 		q##name = (rettype(APIENTRYP)args)GLimp_ExtensionPointer(#name); \
@@ -843,18 +841,18 @@ void R_InitOpenGL( void ) {
 			common->FatalError("Unable to initialize OpenGL (%s)", #name);
 	#include "renderer/qgl_proc.h"
 #else
-	// GLES2 path: attempt to resolve qgl_proc.h functions but don't fatal-error
+	// GLES3 path: attempt to resolve qgl_proc.h functions but don't fatal-error
 	// on null — desktop-GL-only functions (glBegin, glMatrixMode, etc.) will
-	// simply be null on a GLES2 context and must not be called from GLES2 paths.
+	// simply be null on a GLES3 context and must not be called from GLES3 paths.
 	#define QGLPROC(name, rettype, args) \
 		q##name = (rettype(APIENTRYP)args)GLimp_ExtensionPointer(#name);
 	#include "renderer/qgl_proc.h"
-	// GLES2-specific functions are required; fatal-error if missing.
+	// GLES3-specific functions are required; fatal-error if missing.
 	#define QGLPROC(name, rettype, args) \
 		q##name = (rettype(APIENTRYP)args)GLimp_ExtensionPointer(#name); \
 		if (!q##name) \
 			common->FatalError("Unable to initialize OpenGL ES (%s)", #name);
-	#include "renderer/qgl_proc_es2.h"
+	#include "renderer/qgl_proc_es3.h"
 #endif
 
 	// input and sound systems need to be tied to the new window

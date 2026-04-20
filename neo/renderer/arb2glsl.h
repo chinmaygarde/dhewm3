@@ -29,16 +29,16 @@ If you have questions concerning this license or the applicable additional terms
 #ifndef __ARB2GLSL_H__
 #define __ARB2GLSL_H__
 
-#ifdef GLES2_BACKEND
+#ifdef GLES3_BACKEND
 
 #include "idlib/Str.h"
 
-// Translate an ARB assembly program to GLSL ES 1.00.
+// Translate an ARB assembly program to GLSL ES 3.00.
 // arbSrc  : full text of the .vfp (gamma-patched if applicable).
 // isFragment: true for !!ARBfp1.0, false for !!ARBvp1.0.
-// outGLSL : filled with valid GLSL ES 1.00 source on success.
+// outGLSL : filled with valid GLSL ES 3.00 source on success.
 // Returns false if the input has no recognisable header or no END marker.
 bool ARB2GLSL_Translate( const char *arbSrc, bool isFragment, idStr &outGLSL );
 
-#endif /* GLES2_BACKEND */
+#endif /* GLES3_BACKEND */
 #endif /* __ARB2GLSL_H__ */

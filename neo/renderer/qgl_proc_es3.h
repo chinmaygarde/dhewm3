@@ -27,17 +27,17 @@ If you have questions concerning this license or the applicable additional terms
 */
 
 /*
-** QGL_PROC_ES2.H
+** QGL_PROC_ES3.H
 **
-** OpenGL ES 2.0 core function pointer declarations. Loaded at runtime via
+** OpenGL ES 3.0 core function pointer declarations. Loaded at runtime via
 ** SDL_GL_GetProcAddress — no libGLESv2 linkage required.
 **
 ** Only contains functions absent from qgl_proc.h (which covers desktop GL 1.x)
-** or whose GLES2 core names differ from the ARB-suffixed variants in qgl.h.
+** or whose GLES3 core names differ from the ARB-suffixed variants in qgl.h.
 **
 ** Include pattern (same as qgl_proc.h):
 **   #define QGLPROC(name, rettype, args)  ...use name, rettype, args...
-**   #include "renderer/qgl_proc_es2.h"
+**   #include "renderer/qgl_proc_es3.h"
 **   // QGLPROC is #undef'd at the bottom of this file
 */
 
@@ -157,5 +157,18 @@ QGLPROC(glStencilMaskSeparate, void, (GLenum face, GLuint mask))
 /* ---- GLES2 float variants (desktop GL uses double for these) ---- */
 QGLPROC(glClearDepthf, void, (GLclampf depth))
 QGLPROC(glDepthRangef, void, (GLclampf zNear, GLclampf zFar))
+
+/* ---- GLES3 additions ---- */
+/* Vertex Array Objects (core in ES 3.0; were OES extension in ES 2.0) */
+QGLPROC(glGenVertexArrays, void, (GLsizei n, GLuint *arrays))
+QGLPROC(glBindVertexArray, void, (GLuint array))
+QGLPROC(glDeleteVertexArrays, void, (GLsizei n, const GLuint *arrays))
+QGLPROC(glIsVertexArray, GLboolean, (GLuint array))
+/* Multiple render targets */
+QGLPROC(glDrawBuffers, void, (GLsizei n, const GLenum *bufs))
+/* Buffer mapping (core in ES 3.0) */
+QGLPROC(glMapBufferRange, void *, (GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access))
+QGLPROC(glUnmapBuffer, GLboolean, (GLenum target))
+QGLPROC(glFlushMappedBufferRange, void, (GLenum target, GLintptr offset, GLsizeiptr length))
 
 #undef QGLPROC

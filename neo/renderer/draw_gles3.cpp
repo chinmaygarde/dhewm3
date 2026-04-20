@@ -27,12 +27,12 @@ If you have questions concerning this license or the applicable additional terms
 */
 
 /*
-** DRAW_GLES2.CPP
+** DRAW_GLES3.CPP
 **
-** OpenGL ES 2.0 rendering backend.
+** OpenGL ES 3.0 rendering backend.
 **
 ** Phase 3: runtime ARB→GLSL translator integration.  All .vfp shaders are
-** translated at startup and compiled as GLSL ES 1.00 programs.
+** translated at startup and compiled as GLSL ES 3.00 programs.
 ** Phase 4+ (vertex arrays, draw calls, shadow volumes) is still stubbed.
 */
 
@@ -295,7 +295,7 @@ static char *ApplyGammaHack( const char *src ) {
 static GLuint R_GLES2_CompileGLSL( GLenum type, const char *src ) {
 	GLuint shader = qglCreateShader( type );
 	if ( !shader ) {
-		common->Warning( "GLES2: glCreateShader failed" );
+		common->Warning( "GLES3: glCreateShader failed" );
 		return 0;
 	}
 	const GLchar *srcp = (const GLchar *)src;
@@ -308,7 +308,7 @@ static GLuint R_GLES2_CompileGLSL( GLenum type, const char *src ) {
 		GLchar log[4096];
 		GLsizei logLen = 0;
 		qglGetShaderInfoLog( shader, (GLsizei)sizeof(log), &logLen, log );
-		common->Warning( "GLES2 shader compile failed:\n%s\n--- source ---\n%s\n--- end ---",
+		common->Warning( "GLES3 shader compile failed:\n%s\n--- source ---\n%s\n--- end ---",
 		                 log, src );
 		qglDeleteShader( shader );
 		return 0;
@@ -319,7 +319,7 @@ static GLuint R_GLES2_CompileGLSL( GLenum type, const char *src ) {
 static GLuint R_GLES2_LinkProgram( GLuint vert, GLuint frag ) {
 	GLuint prog = qglCreateProgram();
 	if ( !prog ) {
-		common->Warning( "GLES2: glCreateProgram failed" );
+		common->Warning( "GLES3: glCreateProgram failed" );
 		return 0;
 	}
 	qglAttachShader( prog, vert );
@@ -341,7 +341,7 @@ static GLuint R_GLES2_LinkProgram( GLuint vert, GLuint frag ) {
 		GLchar log[4096];
 		GLsizei logLen = 0;
 		qglGetProgramInfoLog( prog, (GLsizei)sizeof(log), &logLen, log );
-		common->Warning( "GLES2 program link failed:\n%s", log );
+		common->Warning( "GLES3 program link failed:\n%s", log );
 		qglDeleteProgram( prog );
 		return 0;
 	}
@@ -353,7 +353,7 @@ static GLuint R_GLES2_LinkProgram( GLuint vert, GLuint frag ) {
 static GLuint R_GLES2_TranslateAndCompile( const char *arbSrc, bool isFragment ) {
 	idStr glsl;
 	if ( !ARB2GLSL_Translate( arbSrc, isFragment, glsl ) ) {
-		common->Warning( "GLES2: ARB2GLSL translation failed" );
+		common->Warning( "GLES3: ARB2GLSL translation failed" );
 		return 0;
 	}
 	return R_GLES2_CompileGLSL(
@@ -405,14 +405,14 @@ static void R_GLES2_InitPrograms( void ) {
 			fullPath += def.name;
 			fileSystem->ReadFile( fullPath.c_str(), (void **)&fileBuffer, NULL );
 			if ( !fileBuffer ) {
-				common->Warning( "GLES2: shader file not found: %s", fullPath.c_str() );
+				common->Warning( "GLES3: shader file not found: %s", fullPath.c_str() );
 				continue;
 			}
 			src = fileBuffer;
 		}
 
 		if ( !src ) {
-			common->Warning( "GLES2: no source for program ident %d", def.ident );
+			common->Warning( "GLES3: no source for program ident %d", def.ident );
 			continue;
 		}
 
@@ -433,7 +433,7 @@ static void R_GLES2_InitPrograms( void ) {
 		}
 
 		if ( !shader ) {
-			common->Warning( "GLES2: compile failed for ident %d (%s)",
+			common->Warning( "GLES3: compile failed for ident %d (%s)",
 			                 def.ident, def.name ? def.name : "<inline>" );
 			continue;
 		}
@@ -502,7 +502,7 @@ static void R_GLES2_InitPrograms( void ) {
 
 		qglUseProgram( 0 );
 
-		common->Printf( "GLES2: linked %s\n",
+		common->Printf( "GLES3: linked %s\n",
 		                vdef.name ? vdef.name : "<inline>" );
 	}
 }
@@ -531,9 +531,9 @@ R_ARB2_Init
 */
 void R_ARB2_Init( void ) {
 	glConfig.allowARB2Path = false;
-	common->Printf( "GLES2 backend: translating and compiling shaders\n" );
+	common->Printf( "GLES3 backend: translating and compiling shaders\n" );
 	R_GLES2_InitPrograms();
-	common->Printf( "GLES2 backend: shader init complete\n" );
+	common->Printf( "GLES3 backend: shader init complete\n" );
 }
 
 /*
@@ -551,7 +551,7 @@ void RB_ARB2_DrawInteractions( void ) {
 R_FindARBProgram
 
 Material.cpp calls this while parsing .mtr files to locate additional
-programs. Under GLES2_BACKEND the ARB program slot mechanism is unused;
+programs. Under GLES3_BACKEND the ARB program slot mechanism is unused;
 return 0 to signal "not found" (materials that rely on custom programs
 will fall back to default rendering).
 =================
@@ -568,7 +568,7 @@ Console command registered by RenderSystem_init.cpp.
 =================
 */
 void R_ReloadARBPrograms_f( const idCmdArgs &args ) {
-	common->Printf( "GLES2: reloading shaders\n" );
+	common->Printf( "GLES3: reloading shaders\n" );
 
 	// Delete existing linked programs and shader objects
 	for ( int i = 0; i < MAX_GLES_PROGS; i++ ) {
