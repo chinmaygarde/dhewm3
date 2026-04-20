@@ -1,6 +1,6 @@
 > **Note**: This is a rough plan. It has not been reviewed for correctness or completeness, and details will change as implementation progresses.
 >
-> **Progress**: Phase 1 complete (commit `2efe8e2`). Phase 2 complete (commit `8aa8146`). Phase 3 complete (commit `8aa8146`).
+> **Progress**: Phase 1 complete (commit `2efe8e2`). Phase 2 complete (commit `8aa8146`). Phase 3 complete (commit `8aa8146`). Phase 4 complete (commit `9b24bc3`).
 
 # OpenGL ES 3.0 Backend Port for dhewm3
 
@@ -101,17 +101,15 @@ This is a large project structured into 7 phases. Each phase is independently bu
 
 ---
 
-### Phase 4: Vertex Array & Draw Call Layer
+### Phase 4: Vertex Array & Draw Call Layer ✅ COMPLETE (commit `9b24bc3`)
 
 **Goal**: Replace ARB-style vertex attribute calls and fixed-function client state with GLES3 VAO-based attribute setup.
 
-**Context**: GLES3 has no `glVertexPointer`, `glTexCoordPointer`, `glClientActiveTexture` (fixed-function client state is gone). It uses `glVertexAttribPointer` + `glEnableVertexAttribArray` with VAOs (Vertex Array Objects, core in ES 3.0).
-
-**Files to modify**:
-- `neo/renderer/draw_common.cpp` — in `#ifdef GLES3_BACKEND` blocks, replace `RB_T_FillDepthBuffer`, `RB_SetupForFastPath`, etc. to use `glVertexAttribPointer` instead of `glVertexPointer`/`glTexCoordPointer`; use VAOs (`glGenVertexArrays`/`glBindVertexArray`) for per-layout binding state
-- `neo/renderer/VertexCache.cpp` — VBO management already uses `qglBindBufferARB`; add `#ifdef GLES3_BACKEND` paths that use core GLES3 `glBindBuffer` / `glGenBuffers`
-- `neo/renderer/tr_backend.cpp` — `RB_SetDefaultGLState()` uses `glEnableClientState(GL_VERTEX_ARRAY)` etc.; guard with `#ifndef GLES3_BACKEND`, add GLES3 replacement that creates and binds a VAO
-- `neo/renderer/draw_gles3.cpp` — implement `RB_GLES2_DrawInteraction()`, `RB_GLES2_DrawAmbient()`, `RB_GLES2_FillDepthBuffer()`, routing to the translated programs from Phase 3
+**Completed**:
+- ✅ `neo/renderer/draw_gles3.cpp` — global VAO created and bound in `R_ARB2_Init`; helpers `GLES2_UseProgram`, `GLES2_UploadProgramEnv`, `GLES2_ComputeAndUploadMVP`, `GLES2_SetupInteractionAttribs` (all 7 `idDrawVert` attribs); `RB_GLES2_DrawInteraction` (per-interaction: sets PP_* slots, uploads programEnv + MVP, binds textures 1–5, draws); `RB_GLES2_CreateDrawInteractions` (per-surface-chain: binds program, normalCubeMap unit 0, specularTable unit 6, iterates surfaces); `RB_ARB2_DrawInteractions` (light loop, skips shadow volumes until Phase 6); `RB_GLES2_FillDepthBuffer` (depth-only pass, iterates surfaces manually to avoid `qglLoadMatrixf`)
+- ✅ `neo/renderer/tr_backend.cpp` — guarded all fixed-function calls in `RB_SetDefaultGLState` with `#ifndef GLES3_BACKEND`; replaced `glConfig.isGLES3` runtime check in `GL_SelectTexture` with `#ifndef GLES3_BACKEND` compile-time guard
+- ✅ `neo/renderer/tr_render.cpp` — guarded `qglMatrixMode`/`qglLoadMatrixf` in `RB_BeginDrawingView`; guarded per-surface model-view load and depth hack enter/leave in `RB_CreateSingleDrawInteractions`
+- ✅ `neo/renderer/draw_common.cpp` — added `BE_GLES3` case to `RB_STD_DrawView` switch; dispatched `RB_STD_FillDepthBuffer` to GLES3 implementation; added early returns to `RB_STD_DrawShaderPasses`, `RB_STD_FogAllLights`, `RB_STD_LightScale` (deferred to Phase 7); redirected `RB_SetProgramEnvironment` to `GLES2_SetProgramEnv` via compile-time macro
 
 **Attribute binding convention** (standardize across all shaders):
 - attrib 0: position (`aPosition`)
@@ -122,7 +120,10 @@ This is a large project structured into 7 phases. Each phase is independently bu
 - attrib 5: bitangent (`aBitangent`)
 - attrib 6: color (`aColor`)
 
-**Verification**: Depth-only pass renders (geometry visible in stencil buffer); some surfaces draw with correct geometry.
+**Known deferred**:
+- GUI/title screen blank — `RB_STD_DrawShaderPasses` returns early (Phase 7)
+- Ambient-only surfaces black — no ambient pass yet (Phase 7)
+- No stencil shadows (Phase 6)
 
 ---
 
