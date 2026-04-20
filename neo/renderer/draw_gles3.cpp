@@ -33,7 +33,7 @@ If you have questions concerning this license or the applicable additional terms
 **
 ** Phase 3: runtime ARB→GLSL translator integration.  All .vfp shaders are
 ** translated at startup and compiled as GLSL ES 3.00 programs.
-** Phase 4+ (vertex arrays, draw calls, shadow volumes) is still stubbed.
+** Phase 6: stencil shadow volumes using glStencilOpSeparate (GLES3 core).
 */
 
 // Set to 1 to load soft-particle shaders from inline strings rather than
@@ -49,6 +49,13 @@ If you have questions concerning this license or the applicable additional terms
 #include "renderer/arb2glsl.h"
 
 #include "renderer/tr_local.h"
+
+extern idCVar r_useCarmacksReverse;
+extern idCVar r_useExternalShadows;
+extern idCVar r_shadows;
+extern idCVar r_showShadows;
+extern idCVar r_shadowPolygonFactor;
+extern idCVar r_shadowPolygonOffset;
 
 // ---------------------------------------------------------------------------
 // Soft-particle inline shader strings (identical to draw_arb2.cpp)
@@ -146,6 +153,14 @@ static const char* flatFShader =
 	"MUL tc, tc, fragment.color;\n"
 	"MUL result.color, tc, matColor;\n"
 	"END\n";
+
+// Minimal GLSL ES 3.00 fragment stub for the stencil shadow pass.
+// Only the stencil buffer is written; fragment color output is irrelevant.
+static const char *shadowStubFShader =
+    "#version 300 es\n"
+    "precision highp float;\n"
+    "out vec4 fragColor;\n"
+    "void main() { fragColor = vec4(0.0); }\n";
 
 // ---------------------------------------------------------------------------
 // Program table — mirrors progs[] in draw_arb2.cpp
@@ -532,8 +547,29 @@ static void R_GLES2_InitPrograms( void ) {
 			if ( matched ) { fragIdent = fdef.ident; break; }
 		}
 
-		// Vertex-only program (shadow.vp has no fragment pair) — skip linking
-		if ( fragIdent < 0 ) continue;
+		// Vertex-only program (shadow.vp has no fragment pair in game data).
+		// Build a minimal GLSL ES fragment stub so the program can be linked.
+		if ( fragIdent < 0 ) {
+			if ( vdef.ident == VPROG_STENCIL_SHADOW ) {
+				GLuint stub = qglCreateShader( GL_FRAGMENT_SHADER );
+				qglShaderSource( stub, 1, &shadowStubFShader, NULL );
+				qglCompileShader( stub );
+				GLuint prog = R_GLES2_LinkProgram( vert, stub );
+				if ( prog ) {
+					glesProgram_t &gp = s_glesProgs[ vdef.ident ];
+					gp.vert  = vert;
+					gp.frag  = stub;
+					gp.prog  = prog;
+					gp.valid = true;
+					qglUseProgram( prog );
+					gp.uProgramEnvLoc = qglGetUniformLocation( prog, "uProgramEnv" );
+					gp.uMVPLoc        = qglGetUniformLocation( prog, "uMVP" );
+					qglUseProgram( 0 );
+					common->Printf( "GLES3: linked shadow.vp + fragment stub\n" );
+				}
+			}
+			continue;
+		}
 
 		GLuint frag = ( fragIdent >= 0 && fragIdent < MAX_GLES_PROGS )
 		              ? compiledShaders[ fragIdent ] : 0;
@@ -820,6 +856,114 @@ void GLES2_SetProgramEnv( int index, const float *v ) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 6: stencil shadow volume pass
+// ---------------------------------------------------------------------------
+
+// Per-surface shadow callback — draws shadow geometry with correct stencil ops.
+static void RB_GLES2_T_Shadow( const drawSurf_t *surf ) {
+	const srfTriangles_t *tri = surf->geo;
+	if ( !tri->shadowCache ) return;
+
+	const glesProgram_t &gp = s_glesProgs[ VPROG_STENCIL_SHADOW ];
+
+	// Upload light origin when the model space changes, then upload all env + MVP.
+	if ( surf->space != backEnd.currentSpace ) {
+		idVec4 localLight;
+		R_GlobalPointToLocal( surf->space->modelMatrix, backEnd.vLight->globalLightOrigin, localLight.ToVec3() );
+		localLight.w = 0.0f;
+		GLES2_SetProgramEnv( PP_LIGHT_ORIGIN, localLight.ToFloatPtr() );
+	}
+	GLES2_UploadProgramEnv( gp );
+	GLES2_ComputeAndUploadMVP( gp, surf->space->modelViewMatrix );
+
+	// shadowCache_t is idVec4 — bind all 4 components (w=0 → infinite, w=1 → finite).
+	shadowCache_t *sc = (shadowCache_t *)vertexCache.Position( tri->shadowCache );
+	qglEnableVertexAttribArray( GLES_ATTRIB_POSITION );
+	qglVertexAttribPointer( GLES_ATTRIB_POSITION, 4, GL_FLOAT, GL_FALSE,
+	                        sizeof(shadowCache_t), sc->xyz.ToFloatPtr() );
+
+	// Determine the index count — mirror the cap-skipping logic from RB_T_Shadow.
+	int numIndexes;
+	bool external = false;
+	if ( !r_useExternalShadows.GetInteger() ) {
+		numIndexes = tri->numIndexes;
+	} else if ( r_useExternalShadows.GetInteger() == 2 ) {
+		numIndexes = tri->numShadowIndexesNoCaps;
+	} else if ( !(surf->dsFlags & DSF_VIEW_INSIDE_SHADOW) ) {
+		numIndexes = tri->numShadowIndexesNoCaps;
+		external = true;
+	} else if ( !backEnd.vLight->viewInsideLight && !(surf->geo->shadowCapPlaneBits & SHADOW_CAP_INFINITE) ) {
+		if ( backEnd.vLight->viewSeesShadowPlaneBits & surf->geo->shadowCapPlaneBits ) {
+			numIndexes = tri->numShadowIndexesNoFrontCaps;
+		} else {
+			numIndexes = tri->numShadowIndexesNoCaps;
+		}
+		external = true;
+	} else {
+		numIndexes = tri->numIndexes;
+	}
+
+	// glStencilOpSeparate is GLES3 core — always use the two-sided single-draw path.
+	GLenum firstFace  = backEnd.viewDef->isMirror ? GL_FRONT : GL_BACK;
+	GLenum secondFace = backEnd.viewDef->isMirror ? GL_BACK  : GL_FRONT;
+
+	GL_Cull( CT_TWO_SIDED );
+	if ( !r_useCarmacksReverse.GetBool() ) {
+		// Z-pass (depth-pass) shadows
+		if ( !external ) {
+			qglStencilOpSeparate( firstFace,  GL_KEEP, tr.stencilDecr, tr.stencilDecr );
+			qglStencilOpSeparate( secondFace, GL_KEEP, tr.stencilIncr, tr.stencilIncr );
+			RB_DrawShadowElementsWithCounters( tri, numIndexes );
+		}
+		qglStencilOpSeparate( firstFace,  GL_KEEP, GL_KEEP, tr.stencilIncr );
+		qglStencilOpSeparate( secondFace, GL_KEEP, GL_KEEP, tr.stencilDecr );
+		RB_DrawShadowElementsWithCounters( tri, numIndexes );
+	} else {
+		// Z-fail (Carmack's Reverse)
+		if ( !external ) {
+			qglStencilOpSeparate( firstFace,  GL_KEEP, tr.stencilDecr, GL_KEEP );
+			qglStencilOpSeparate( secondFace, GL_KEEP, tr.stencilIncr, GL_KEEP );
+		} else {
+			qglStencilOpSeparate( firstFace,  GL_KEEP, GL_KEEP, tr.stencilIncr );
+			qglStencilOpSeparate( secondFace, GL_KEEP, GL_KEEP, tr.stencilDecr );
+		}
+		RB_DrawShadowElementsWithCounters( tri, numIndexes );
+	}
+}
+
+// Full shadow pass for one set of shadow surfaces (globalShadows or localShadows).
+static void RB_GLES2_StencilShadowPass( const drawSurf_t *drawSurfs ) {
+	if ( !r_shadows.GetBool() || !drawSurfs ) return;
+
+	const glesProgram_t *gp = GLES2_UseProgram( VPROG_STENCIL_SHADOW );
+	if ( !gp ) return;
+
+	if ( r_showShadows.GetInteger() == 2 ) {
+		GL_State( GLS_DEPTHMASK | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE | GLS_DEPTHFUNC_LESS );
+	} else {
+		GL_State( GLS_DEPTHMASK | GLS_COLORMASK | GLS_ALPHAMASK | GLS_DEPTHFUNC_LESS );
+	}
+
+	if ( r_shadowPolygonFactor.GetFloat() || r_shadowPolygonOffset.GetFloat() ) {
+		qglPolygonOffset( r_shadowPolygonFactor.GetFloat(), -r_shadowPolygonOffset.GetFloat() );
+		qglEnable( GL_POLYGON_OFFSET_FILL );
+	}
+
+	qglStencilFunc( GL_ALWAYS, 1, 255 );
+
+	RB_RenderDrawSurfChainWithFunction( drawSurfs, RB_GLES2_T_Shadow );
+
+	GL_Cull( CT_FRONT_SIDED );
+
+	if ( r_shadowPolygonFactor.GetFloat() || r_shadowPolygonOffset.GetFloat() ) {
+		qglDisable( GL_POLYGON_OFFSET_FILL );
+	}
+
+	qglStencilFunc( GL_GEQUAL, 128, 255 );
+	qglStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
+}
+
+// ---------------------------------------------------------------------------
 // Phase 7: ambient/GUI shader pass (replaces RB_STD_T_RenderShaderPasses for GLES3)
 // ---------------------------------------------------------------------------
 
@@ -997,11 +1141,23 @@ void RB_ARB2_DrawInteractions( void ) {
 		     !vLight->globalInteractions &&
 		     !vLight->translucentInteractions )      continue;
 
-		// Shadow volumes are Phase 6; always let the stencil test pass.
-		qglStencilFunc( GL_ALWAYS, 128, 255 );
+		if ( vLight->globalShadows || vLight->localShadows ) {
+			backEnd.currentScissor = vLight->scissorRect;
+			if ( r_useScissor.GetBool() ) {
+				qglScissor( backEnd.viewDef->viewport.x1 + backEnd.currentScissor.x1,
+				            backEnd.viewDef->viewport.y1 + backEnd.currentScissor.y1,
+				            backEnd.currentScissor.x2 + 1 - backEnd.currentScissor.x1,
+				            backEnd.currentScissor.y2 + 1 - backEnd.currentScissor.y1 );
+			}
+			qglClear( GL_STENCIL_BUFFER_BIT );
+		} else {
+			qglStencilFunc( GL_ALWAYS, 128, 255 );
+		}
 
+		RB_GLES2_StencilShadowPass( vLight->globalShadows );
 		backEnd.depthFunc = GLS_DEPTHFUNC_EQUAL;
 		RB_GLES2_CreateDrawInteractions( vLight->localInteractions );
+		RB_GLES2_StencilShadowPass( vLight->localShadows );
 		RB_GLES2_CreateDrawInteractions( vLight->globalInteractions );
 
 		if ( !r_skipTranslucent.GetBool() ) {

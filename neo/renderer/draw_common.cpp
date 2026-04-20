@@ -1325,6 +1325,7 @@ static void RB_T_Shadow( const drawSurf_t *surf ) {
 	const srfTriangles_t	*tri;
 
 	// set the light position if we are using a vertex program to project the rear surfaces
+#ifndef GLES3_BACKEND
 	if ( tr.backEndRendererHasVertexPrograms && r_useShadowVertexProgram.GetBool()
 		&& surf->space != backEnd.currentSpace ) {
 		idVec4 localLight;
@@ -1333,6 +1334,7 @@ static void RB_T_Shadow( const drawSurf_t *surf ) {
 		localLight.w = 0.0f;
 		qglProgramEnvParameter4fvARB( GL_VERTEX_PROGRAM_ARB, PP_LIGHT_ORIGIN, localLight.ToFloatPtr() );
 	}
+#endif
 
 	tri = surf->geo;
 
@@ -1340,7 +1342,9 @@ static void RB_T_Shadow( const drawSurf_t *surf ) {
 		return;
 	}
 
+#ifndef GLES3_BACKEND
 	qglVertexPointer( 4, GL_FLOAT, sizeof( shadowCache_t ), vertexCache.Position(tri->shadowCache) );
+#endif
 
 	// we always draw the sil planes, but we may not need to draw the front or rear caps
 	int	numIndexes;
@@ -1516,7 +1520,9 @@ void RB_StencilShadowPass( const drawSurf_t *drawSurfs ) {
 	}
 
 	globalImages->BindNull();
+#ifndef GLES3_BACKEND
 	qglDisableClientState( GL_TEXTURE_COORD_ARRAY );
+#endif
 
 	// for visualizing the shadows
 	if ( r_showShadows.GetInteger() ) {
@@ -1539,9 +1545,11 @@ void RB_StencilShadowPass( const drawSurf_t *drawSurfs ) {
 
 	qglStencilFunc( GL_ALWAYS, 1, 255 );
 
+#ifndef GLES3_BACKEND
 	if ( glConfig.depthBoundsTestAvailable && r_useDepthBoundsTest.GetBool() ) {
 		qglEnable( GL_DEPTH_BOUNDS_TEST_EXT );
 	}
+#endif
 
 	RB_RenderDrawSurfChainWithFunction( drawSurfs, RB_T_Shadow );
 
@@ -1551,11 +1559,13 @@ void RB_StencilShadowPass( const drawSurf_t *drawSurfs ) {
 		qglDisable( GL_POLYGON_OFFSET_FILL );
 	}
 
+#ifndef GLES3_BACKEND
 	if ( glConfig.depthBoundsTestAvailable && r_useDepthBoundsTest.GetBool() ) {
 		qglDisable( GL_DEPTH_BOUNDS_TEST_EXT );
 	}
 
 	qglEnableClientState( GL_TEXTURE_COORD_ARRAY );
+#endif
 
 	qglStencilFunc( GL_GEQUAL, 128, 255 );
 	qglStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );

@@ -148,19 +148,20 @@ This is a large project structured into 7 phases. Each phase is independently bu
 
 ---
 
-### Phase 6: Stencil Shadow Volumes on GLES3
+### Phase 6: Stencil Shadow Volumes on GLES3 ✅ COMPLETE
 
 **Goal**: Implement Carmack's Reverse shadow volumes without `GL_EXT_stencil_two_side` or depth bounds test.
 
 **Context**: GLES3 core has `glStencilFuncSeparate` and `glStencilOpSeparate`. `GL_EXT_depth_bounds_test` is not available. `GL_INCR_WRAP` and `GL_DECR_WRAP` are core in GLES3.
 
-**Files to modify**:
-- `neo/renderer/draw_common.cpp` — `RB_StencilShadowPass()`: under `#ifdef GLES3_BACKEND`:
-  - Remove `qglActiveStencilFaceEXT` / `qglDepthBoundsEXT` calls
-  - Use `glStencilFuncSeparate(GL_FRONT, ...)` + `glStencilOpSeparate(GL_BACK, ...)` (these are core GLES3)
-  - Bind the translated shadow vertex program (from Phase 3) instead of ARB vertex program
-  - Disable depth bounds optimization (accept minor performance regression)
-- `neo/renderer/draw_gles3.cpp` — implement `RB_GLES2_StencilShadowPass()`
+**Completed**:
+- ✅ `neo/renderer/draw_gles3.cpp` — `shadowStubFShader`: minimal GLSL ES 3.00 fragment stub (outputs `vec4(0.0)`) so shadow.vp can be linked as a full program
+- ✅ `neo/renderer/draw_gles3.cpp` — `R_GLES2_InitPrograms()` linking loop: special-cases `VPROG_STENCIL_SHADOW` to compile the stub fragment shader and link shadow.vp + stub into `s_glesProgs[VPROG_STENCIL_SHADOW]`
+- ✅ `neo/renderer/draw_gles3.cpp` — `RB_GLES2_T_Shadow()`: per-surface callback; uploads MVP + PP_LIGHT_ORIGIN via `GLES2_ComputeAndUploadMVP`/`GLES2_UploadProgramEnv`; binds `shadowCache_t` position (4-component `idVec4`) to `GLES_ATTRIB_POSITION`; always uses `qglStencilOpSeparate` (GLES3 core) for two-sided stencil in one draw call; supports both z-pass and z-fail (Carmack's Reverse) paths
+- ✅ `neo/renderer/draw_gles3.cpp` — `RB_GLES2_StencilShadowPass()`: full shadow pass; binds shadow program; sets GL state (color/alpha mask); calls `RB_RenderDrawSurfChainWithFunction` with `RB_GLES2_T_Shadow`; resets stencil func to `GL_GEQUAL, 128` for the lighting pass; no depth bounds test (not available on GLES3)
+- ✅ `neo/renderer/draw_gles3.cpp` — `RB_ARB2_DrawInteractions()`: mirrors the ARB2 interaction loop; clears stencil buffer per-light when shadows exist; calls `RB_GLES2_StencilShadowPass(globalShadows)` + interactions + `RB_GLES2_StencilShadowPass(localShadows)` + interactions
+- ✅ `neo/renderer/draw_common.cpp` — `RB_T_Shadow()`: guarded `qglProgramEnvParameter4fvARB` and `qglVertexPointer` with `#ifndef GLES3_BACKEND`
+- ✅ `neo/renderer/draw_common.cpp` — `RB_StencilShadowPass()`: guarded `qglDisableClientState`/`qglEnableClientState` and `qglDepthBoundsEXT` enable/disable with `#ifndef GLES3_BACKEND`
 
 **Verification**: Shadows render correctly in lit scenes.
 
