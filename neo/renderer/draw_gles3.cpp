@@ -173,8 +173,14 @@ struct glesProgram_t {
 static glesProgram_t s_glesProgs[MAX_GLES_PROGS];
 
 // CPU-side mirror of program.env[] parameters (uploaded to the current
-// program's uProgramEnv uniform at draw time — Phase 4).
+// program's uProgramEnv uniform at draw time).
 static float s_programEnv[32][4];
+
+// Single global VAO; bound once for the session so glVertexAttribPointer is legal.
+static GLuint s_vao = 0;
+
+// Currently bound VPROG_* ident; -1 means no program is active.
+static int s_currentProgIdent = -1;
 
 // Fixed attribute locations bound before linking (must match the vertex
 // attribute setup in Phase 4).
@@ -529,6 +535,219 @@ static void R_GLES2_InitPrograms( void ) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 4 draw helpers
+// ---------------------------------------------------------------------------
+
+void GLES2_SetProgramEnv( int index, const float *v ); // defined below
+
+// Bind a GLSL program by VPROG_* ident; no-op if already current.
+static const glesProgram_t *GLES2_UseProgram( int vprogIdent ) {
+	if ( vprogIdent < 0 || vprogIdent >= MAX_GLES_PROGS ) return NULL;
+	glesProgram_t &gp = s_glesProgs[ vprogIdent ];
+	if ( !gp.valid ) return NULL;
+	if ( s_currentProgIdent != vprogIdent ) {
+		qglUseProgram( gp.prog );
+		s_currentProgIdent = vprogIdent;
+	}
+	return &gp;
+}
+
+// Upload the full 32-slot s_programEnv mirror to the shader's uProgramEnv uniform.
+static void GLES2_UploadProgramEnv( const glesProgram_t &gp ) {
+	if ( gp.uProgramEnvLoc >= 0 )
+		qglUniform4fv( gp.uProgramEnvLoc, 32, (float *)s_programEnv );
+}
+
+// Compute MVP = projection * modelView and upload to the shader's uMVP uniform.
+static void GLES2_ComputeAndUploadMVP( const glesProgram_t &gp, const float *mv ) {
+	if ( gp.uMVPLoc < 0 ) return;
+	const float *proj = backEnd.viewDef->projectionMatrix;
+	float mvp[16];
+	for ( int c = 0; c < 4; c++ )
+		for ( int r = 0; r < 4; r++ ) {
+			mvp[c*4+r] = 0;
+			for ( int k = 0; k < 4; k++ )
+				mvp[c*4+r] += proj[k*4+r] * mv[c*4+k];
+		}
+	qglUniformMatrix4fv( gp.uMVPLoc, 1, GL_FALSE, mvp );
+}
+
+// Set up all vertex attribute pointers for an idDrawVert base.
+// The caller must have already called vertexCache.Position() to bind the VBO.
+static void GLES2_SetupInteractionAttribs( const idDrawVert *base ) {
+	qglEnableVertexAttribArray( GLES_ATTRIB_POSITION );
+	qglVertexAttribPointer( GLES_ATTRIB_POSITION,  3, GL_FLOAT,         GL_FALSE,
+	                        sizeof(idDrawVert), &base->xyz );
+
+	qglEnableVertexAttribArray( GLES_ATTRIB_TEXCOORD0 );
+	qglVertexAttribPointer( GLES_ATTRIB_TEXCOORD0, 2, GL_FLOAT,         GL_FALSE,
+	                        sizeof(idDrawVert), &base->st );
+
+	qglEnableVertexAttribArray( GLES_ATTRIB_NORMAL );
+	qglVertexAttribPointer( GLES_ATTRIB_NORMAL,    3, GL_FLOAT,         GL_FALSE,
+	                        sizeof(idDrawVert), &base->normal );
+
+	qglEnableVertexAttribArray( GLES_ATTRIB_TANGENT );
+	qglVertexAttribPointer( GLES_ATTRIB_TANGENT,   3, GL_FLOAT,         GL_FALSE,
+	                        sizeof(idDrawVert), &base->tangents[0] );
+
+	qglEnableVertexAttribArray( GLES_ATTRIB_BITANGENT );
+	qglVertexAttribPointer( GLES_ATTRIB_BITANGENT, 3, GL_FLOAT,         GL_FALSE,
+	                        sizeof(idDrawVert), &base->tangents[1] );
+
+	qglEnableVertexAttribArray( GLES_ATTRIB_COLOR );
+	qglVertexAttribPointer( GLES_ATTRIB_COLOR,     4, GL_UNSIGNED_BYTE, GL_TRUE,
+	                        sizeof(idDrawVert), base->color );
+}
+
+// ---------------------------------------------------------------------------
+// Per-interaction draw callback — called by RB_CreateSingleDrawInteractions.
+// ---------------------------------------------------------------------------
+
+static void RB_GLES2_DrawInteraction( const drawInteraction_t *din ) {
+	static const float zero[4]   = { 0, 0, 0, 0 };
+	static const float one[4]    = { 1, 1, 1, 1 };
+	static const float negOne[4] = { -1, -1, -1, -1 };
+
+	// vertex environment parameters
+	GLES2_SetProgramEnv( PP_LIGHT_ORIGIN,      din->localLightOrigin.ToFloatPtr() );
+	GLES2_SetProgramEnv( PP_VIEW_ORIGIN,       din->localViewOrigin.ToFloatPtr() );
+	GLES2_SetProgramEnv( PP_LIGHT_PROJECT_S,   din->lightProjection[0].ToFloatPtr() );
+	GLES2_SetProgramEnv( PP_LIGHT_PROJECT_T,   din->lightProjection[1].ToFloatPtr() );
+	GLES2_SetProgramEnv( PP_LIGHT_PROJECT_Q,   din->lightProjection[2].ToFloatPtr() );
+	GLES2_SetProgramEnv( PP_LIGHT_FALLOFF_S,   din->lightProjection[3].ToFloatPtr() );
+	GLES2_SetProgramEnv( PP_BUMP_MATRIX_S,     din->bumpMatrix[0].ToFloatPtr() );
+	GLES2_SetProgramEnv( PP_BUMP_MATRIX_T,     din->bumpMatrix[1].ToFloatPtr() );
+	GLES2_SetProgramEnv( PP_DIFFUSE_MATRIX_S,  din->diffuseMatrix[0].ToFloatPtr() );
+	GLES2_SetProgramEnv( PP_DIFFUSE_MATRIX_T,  din->diffuseMatrix[1].ToFloatPtr() );
+	GLES2_SetProgramEnv( PP_SPECULAR_MATRIX_S, din->specularMatrix[0].ToFloatPtr() );
+	GLES2_SetProgramEnv( PP_SPECULAR_MATRIX_T, din->specularMatrix[1].ToFloatPtr() );
+
+	switch ( din->vertexColor ) {
+	case SVC_IGNORE:
+		GLES2_SetProgramEnv( PP_COLOR_MODULATE, zero );
+		GLES2_SetProgramEnv( PP_COLOR_ADD,      one );
+		break;
+	case SVC_MODULATE:
+		GLES2_SetProgramEnv( PP_COLOR_MODULATE, one );
+		GLES2_SetProgramEnv( PP_COLOR_ADD,      zero );
+		break;
+	case SVC_INVERSE_MODULATE:
+		GLES2_SetProgramEnv( PP_COLOR_MODULATE, negOne );
+		GLES2_SetProgramEnv( PP_COLOR_ADD,      one );
+		break;
+	}
+
+	// fragment environment parameters (slots 0 and 1 are safe — interaction.vfp
+	// vertex shader does not read those slots)
+	GLES2_SetProgramEnv( 0, din->diffuseColor.ToFloatPtr() );
+	GLES2_SetProgramEnv( 1, din->specularColor.ToFloatPtr() );
+
+	if ( r_gammaInShader.GetBool() ) {
+		float parm[4];
+		parm[0] = parm[1] = parm[2] = r_brightness.GetFloat();
+		parm[3] = 1.0f / r_gamma.GetFloat();
+		GLES2_SetProgramEnv( PP_GAMMA_BRIGHTNESS, parm );
+	}
+
+	const glesProgram_t &gp = s_glesProgs[ s_currentProgIdent ];
+	GLES2_UploadProgramEnv( gp );
+	GLES2_ComputeAndUploadMVP( gp, din->surf->space->modelViewMatrix );
+
+	GL_SelectTexture( 1 ); din->bumpImage->Bind();
+	GL_SelectTexture( 2 ); din->lightFalloffImage->Bind();
+	GL_SelectTexture( 3 ); din->lightImage->Bind();
+	GL_SelectTexture( 4 ); din->diffuseImage->Bind();
+	GL_SelectTexture( 5 ); din->specularImage->Bind();
+
+	RB_DrawElementsWithCounters( din->surf->geo );
+}
+
+// ---------------------------------------------------------------------------
+// Per-surface-chain interaction setup.
+// ---------------------------------------------------------------------------
+
+static void RB_GLES2_CreateDrawInteractions( const drawSurf_t *surf ) {
+	if ( !surf ) return;
+
+	int vprogIdent = r_testARBProgram.GetBool() ? VPROG_TEST : VPROG_INTERACTION;
+	const glesProgram_t *gp = GLES2_UseProgram( vprogIdent );
+	if ( !gp ) return;
+
+	GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE | GLS_DEPTHMASK | backEnd.depthFunc );
+
+	// texture 0: normalisation cube map / ambient normal map
+	GL_SelectTexture( 0 );
+	if ( backEnd.vLight->lightShader->IsAmbientLight() ) {
+		globalImages->ambientNormalMap->Bind();
+	} else {
+		globalImages->normalCubeMapImage->Bind();
+	}
+
+	// texture 6: specular lookup table
+	GL_SelectTexture( 6 );
+	if ( r_testARBProgram.GetBool() ) {
+		globalImages->specular2DTableImage->Bind();
+	} else {
+		globalImages->specularTableImage->Bind();
+	}
+
+	for ( ; surf ; surf = surf->nextOnLight ) {
+		idDrawVert *ac = (idDrawVert *)vertexCache.Position( surf->geo->ambientCache );
+		GLES2_SetupInteractionAttribs( ac );
+		RB_CreateSingleDrawInteractions( surf, RB_GLES2_DrawInteraction );
+	}
+
+	// unbind textures
+	GL_SelectTexture( 6 ); globalImages->BindNull();
+	GL_SelectTexture( 5 ); globalImages->BindNull();
+	GL_SelectTexture( 4 ); globalImages->BindNull();
+	GL_SelectTexture( 3 ); globalImages->BindNull();
+	GL_SelectTexture( 2 ); globalImages->BindNull();
+	GL_SelectTexture( 1 ); globalImages->BindNull();
+
+	backEnd.glState.currenttmu = -1;
+	GL_SelectTexture( 0 );
+}
+
+// ---------------------------------------------------------------------------
+// GLES3 depth fill — called from RB_STD_FillDepthBuffer in draw_common.cpp.
+// ---------------------------------------------------------------------------
+
+void RB_GLES2_FillDepthBuffer( drawSurf_t **drawSurfs, int numDrawSurfs ) {
+	if ( !backEnd.viewDef->viewEntitys ) return;
+
+	const glesProgram_t *gp = GLES2_UseProgram( VPROG_INTERACTION );
+	if ( !gp ) return;
+
+	qglColorMask( 0, 0, 0, 0 );
+	qglDepthMask( GL_TRUE );
+	GL_State( GLS_DEPTHFUNC_LESS );
+	qglEnable( GL_STENCIL_TEST );
+	qglStencilFunc( GL_ALWAYS, 1, 255 );
+	qglPolygonOffset( r_offsetFactor.GetFloat(), r_offsetUnits.GetFloat() );
+
+	for ( int i = 0; i < numDrawSurfs; i++ ) {
+		const drawSurf_t *surf = drawSurfs[i];
+		const srfTriangles_t *tri = surf->geo;
+		if ( !tri || !tri->ambientCache ) continue;
+		if ( surf->material->Coverage() == MC_TRANSLUCENT ) continue;
+		if ( !surf->material->IsDrawn() ) continue;
+		if ( !tri->numIndexes ) continue;
+
+		idDrawVert *ac = (idDrawVert *)vertexCache.Position( tri->ambientCache );
+		qglEnableVertexAttribArray( GLES_ATTRIB_POSITION );
+		qglVertexAttribPointer( GLES_ATTRIB_POSITION, 3, GL_FLOAT, GL_FALSE,
+		                        sizeof(idDrawVert), &ac->xyz );
+
+		GLES2_ComputeAndUploadMVP( *gp, surf->space->modelViewMatrix );
+		RB_DrawElementsWithCounters( tri );
+	}
+
+	qglColorMask( 1, 1, 1, 1 );
+}
+
+// ---------------------------------------------------------------------------
 // CPU-side program.env[] mirror — called instead of qglProgramEnvParameter4fvARB
 // ---------------------------------------------------------------------------
 
@@ -554,17 +773,51 @@ void R_ARB2_Init( void ) {
 	glConfig.allowARB2Path = false;
 	common->Printf( "GLES3 backend: translating and compiling shaders\n" );
 	R_GLES2_InitPrograms();
+
+	qglGenVertexArrays( 1, &s_vao );
+	qglBindVertexArray( s_vao );
+	s_currentProgIdent = -1;
+
 	common->Printf( "GLES3 backend: shader init complete\n" );
 }
 
 /*
 =================
 RB_ARB2_DrawInteractions
-
-Stub — Phase 4 will implement the full interaction lighting pass.
 =================
 */
 void RB_ARB2_DrawInteractions( void ) {
+	GL_SelectTexture( 0 );
+
+	for ( viewLight_t *vLight = backEnd.viewDef->viewLights;
+	      vLight; vLight = vLight->next ) {
+
+		backEnd.vLight = vLight;
+
+		if ( vLight->lightShader->IsFogLight() )   continue;
+		if ( vLight->lightShader->IsBlendLight() )  continue;
+		if ( !vLight->localInteractions &&
+		     !vLight->globalInteractions &&
+		     !vLight->translucentInteractions )      continue;
+
+		// Shadow volumes are Phase 6; always let the stencil test pass.
+		qglStencilFunc( GL_ALWAYS, 128, 255 );
+
+		backEnd.depthFunc = GLS_DEPTHFUNC_EQUAL;
+		RB_GLES2_CreateDrawInteractions( vLight->localInteractions );
+		RB_GLES2_CreateDrawInteractions( vLight->globalInteractions );
+
+		if ( !r_skipTranslucent.GetBool() ) {
+			qglStencilFunc( GL_ALWAYS, 128, 255 );
+			backEnd.depthFunc = GLS_DEPTHFUNC_LESS;
+			RB_GLES2_CreateDrawInteractions( vLight->translucentInteractions );
+			backEnd.depthFunc = GLS_DEPTHFUNC_EQUAL;
+		}
+	}
+
+	qglStencilFunc( GL_ALWAYS, 128, 255 );
+	qglUseProgram( 0 );
+	s_currentProgIdent = -1;
 }
 
 /*

@@ -526,6 +526,11 @@ to force the alpha test to fail when behind that clip plane
 =====================
 */
 void RB_STD_FillDepthBuffer( drawSurf_t **drawSurfs, int numDrawSurfs ) {
+#ifdef GLES3_BACKEND
+	extern void RB_GLES2_FillDepthBuffer( drawSurf_t **drawSurfs, int numDrawSurfs );
+	RB_GLES2_FillDepthBuffer( drawSurfs, numDrawSurfs );
+	return;
+#endif
 	// if we are just doing 2D rendering, no need to fill the depth buffer
 	if ( !backEnd.viewDef->viewEntitys ) {
 		return;
@@ -612,9 +617,20 @@ void RB_SetProgramEnvironment( bool isPostProcess ) {
 	float	parm[4];
 	int		pot;
 
+#ifndef GLES3_BACKEND
 	if ( !glConfig.ARBVertexProgramAvailable ) {
 		return;
 	}
+#endif
+
+#ifdef GLES3_BACKEND
+	extern void GLES2_SetProgramEnv( int index, const float *v );
+#define SET_VPROG_ENV( slot, p ) GLES2_SetProgramEnv( slot, p )
+#define SET_FPROG_ENV( slot, p ) GLES2_SetProgramEnv( slot, p )
+#else
+#define SET_VPROG_ENV( slot, p ) qglProgramEnvParameter4fvARB( GL_VERTEX_PROGRAM_ARB,   slot, p )
+#define SET_FPROG_ENV( slot, p ) qglProgramEnvParameter4fvARB( GL_FRAGMENT_PROGRAM_ARB, slot, p )
+#endif
 
 #if 0
 	// screen power of two correction factor, one pixel in so we don't get a bilerp
@@ -637,7 +653,7 @@ void RB_SetProgramEnvironment( bool isPostProcess ) {
 
 	parm[2] = 0;
 	parm[3] = 1;
-	qglProgramEnvParameter4fvARB( GL_VERTEX_PROGRAM_ARB, 0, parm );
+	SET_VPROG_ENV( 0, parm );
 #else
 	// screen power of two correction factor, assuming the copy to _currentRender
 	// also copied an extra row and column for the bilerp
@@ -651,17 +667,17 @@ void RB_SetProgramEnvironment( bool isPostProcess ) {
 
 	parm[2] = 0;
 	parm[3] = 1;
-	qglProgramEnvParameter4fvARB( GL_VERTEX_PROGRAM_ARB, 0, parm );
+	SET_VPROG_ENV( 0, parm );
 #endif
 
-	qglProgramEnvParameter4fvARB( GL_FRAGMENT_PROGRAM_ARB, 0, parm );
+	SET_FPROG_ENV( 0, parm );
 
 	// window coord to 0.0 to 1.0 conversion
 	parm[0] = 1.0 / w;
 	parm[1] = 1.0 / h;
 	parm[2] = 0;
 	parm[3] = 1;
-	qglProgramEnvParameter4fvARB( GL_FRAGMENT_PROGRAM_ARB, 1, parm );
+	SET_FPROG_ENV( 1, parm );
 
 	// DG: brightness and gamma in shader as program.env[4]
 	if ( r_gammaInShader.GetBool() ) {
@@ -674,22 +690,22 @@ void RB_SetProgramEnvironment( bool isPostProcess ) {
 			// (setting them to 1.0 makes them no-ops)
 			parm[0] = parm[1] = parm[2] = parm[3] = 1.0f;
 		}
-		qglProgramEnvParameter4fvARB( GL_FRAGMENT_PROGRAM_ARB, PP_GAMMA_BRIGHTNESS, parm );
+		SET_FPROG_ENV( PP_GAMMA_BRIGHTNESS, parm );
 	}
 
-	// #3877: Allow shaders to access depth buffer. 
-	// Two useful ratios are packed into this parm: [0] and [1] hold the x,y multipliers you need to map a screen 
-	// coordinate (fragment position) to the depth image: those are simply the reciprocal of the depth 
+	// #3877: Allow shaders to access depth buffer.
+	// Two useful ratios are packed into this parm: [0] and [1] hold the x,y multipliers you need to map a screen
+	// coordinate (fragment position) to the depth image: those are simply the reciprocal of the depth
 	// image size, which has been rounded up to a power of two. Slots [3] and [4] hold the ratio of the depth image
-	// size to the current render image size. These sizes can differ if the game crops the render viewport temporarily 
-	// during post-processing effects. The depth render is smaller during the effect too, but the depth image doesn't 
-	// need to be downsized, whereas the current render image does get downsized when it's captured by the game after 
+	// size to the current render image size. These sizes can differ if the game crops the render viewport temporarily
+	// during post-processing effects. The depth render is smaller during the effect too, but the depth image doesn't
+	// need to be downsized, whereas the current render image does get downsized when it's captured by the game after
 	// the skybox render pass. The ratio is needed to map between the two render images.
 	parm[0] = 1.0f / globalImages->currentDepthImage->uploadWidth;
 	parm[1] = 1.0f / globalImages->currentDepthImage->uploadHeight;
 	parm[2] = static_cast<float>(globalImages->currentRenderImage->uploadWidth) / globalImages->currentDepthImage->uploadWidth;
 	parm[3] = static_cast<float>(globalImages->currentRenderImage->uploadHeight) / globalImages->currentDepthImage->uploadHeight;
-	qglProgramEnvParameter4fvARB( GL_FRAGMENT_PROGRAM_ARB, PP_CURDEPTH_RECIPR, parm );
+	SET_FPROG_ENV( PP_CURDEPTH_RECIPR, parm );
 
 	//
 	// set eye position in global space
@@ -698,7 +714,10 @@ void RB_SetProgramEnvironment( bool isPostProcess ) {
 	parm[1] = backEnd.viewDef->renderView.vieworg[1];
 	parm[2] = backEnd.viewDef->renderView.vieworg[2];
 	parm[3] = 1.0;
-	qglProgramEnvParameter4fvARB( GL_VERTEX_PROGRAM_ARB, 1, parm );
+	SET_VPROG_ENV( 1, parm );
+
+#undef SET_VPROG_ENV
+#undef SET_FPROG_ENV
 }
 
 /*
@@ -1209,6 +1228,9 @@ Draw non-light dependent passes
 =====================
 */
 int RB_STD_DrawShaderPasses( drawSurf_t **drawSurfs, int numDrawSurfs ) {
+#ifdef GLES3_BACKEND
+	return 0;
+#endif
 	int				i;
 
 	// only obey skipAmbient if we are rendering a view
@@ -1827,6 +1849,9 @@ RB_STD_FogAllLights
 ==================
 */
 void RB_STD_FogAllLights( void ) {
+#ifdef GLES3_BACKEND
+	return;
+#endif
 	viewLight_t	*vLight;
 
 	if ( r_skipFogLights.GetBool() || r_showOverDraw.GetInteger() != 0
@@ -1891,6 +1916,9 @@ a floating point value
 ==================
 */
 void RB_STD_LightScale( void ) {
+#ifdef GLES3_BACKEND
+	return;
+#endif
 	float	v, f;
 
 	if ( backEnd.overBright == 1.0f ) {
@@ -1977,6 +2005,9 @@ void	RB_STD_DrawView( void ) {
 
 	// main light renderer
 	switch( tr.backEndRenderer ) {
+#ifdef GLES3_BACKEND
+	case BE_GLES3:
+#endif
 	case BE_ARB2:
 		RB_ARB2_DrawInteractions();
 		break;

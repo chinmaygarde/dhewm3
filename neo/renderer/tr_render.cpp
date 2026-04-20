@@ -558,9 +558,11 @@ void RB_BeginDrawingView (void) {
 	const viewDef_t* viewDef = backEnd.viewDef;
 
 	// set the modelview matrix for the viewer
+#ifndef GLES3_BACKEND
 	qglMatrixMode(GL_PROJECTION);
 	qglLoadMatrixf( viewDef->projectionMatrix );
 	qglMatrixMode(GL_MODELVIEW);
+#endif
 
 	// set the window clipping
 	qglViewport( tr.viewportOffset[0] + viewDef->viewport.x1,
@@ -719,7 +721,9 @@ void RB_CreateSingleDrawInteractions( const drawSurf_t *surf, void (*DrawInterac
 	// change the matrix and light projection vectors if needed
 	if ( surf->space != backEnd.currentSpace ) {
 		backEnd.currentSpace = surf->space;
+#ifndef GLES3_BACKEND
 		qglLoadMatrixf( surf->space->modelViewMatrix );
+#endif
 	}
 
 	// change the scissor if needed
@@ -732,6 +736,7 @@ void RB_CreateSingleDrawInteractions( const drawSurf_t *surf, void (*DrawInterac
 	}
 
 	// hack depth range if needed
+#ifndef GLES3_BACKEND
 	if ( surf->space->weaponDepthHack ) {
 		RB_EnterWeaponDepthHack();
 	}
@@ -739,6 +744,7 @@ void RB_CreateSingleDrawInteractions( const drawSurf_t *surf, void (*DrawInterac
 	if ( surf->space->modelDepthHack ) {
 		RB_EnterModelDepthHack( surf->space->modelDepthHack );
 	}
+#endif
 
 	inter.surf = surf;
 	inter.lightFalloffImage = vLight->falloffImage;
@@ -855,9 +861,11 @@ void RB_CreateSingleDrawInteractions( const drawSurf_t *surf, void (*DrawInterac
 	}
 
 	// unhack depth range if needed
+#ifndef GLES3_BACKEND
 	if ( surf->space->weaponDepthHack || surf->space->modelDepthHack != 0.0f ) {
 		RB_LeaveDepthHack();
 	}
+#endif
 }
 
 /*

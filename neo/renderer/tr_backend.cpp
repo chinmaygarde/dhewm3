@@ -44,19 +44,18 @@ may touch, including the editor.
 ======================
 */
 void RB_SetDefaultGLState( void ) {
-	int		i;
-
 	qglClearDepth( 1.0f );
-	qglColor4f (1,1,1,1);
+
+#ifndef GLES3_BACKEND
+	int i;
+	qglColor4f( 1, 1, 1, 1 );
 
 	// the vertex array is always enabled
 	qglEnableClientState( GL_VERTEX_ARRAY );
 	qglEnableClientState( GL_TEXTURE_COORD_ARRAY );
 	qglDisableClientState( GL_COLOR_ARRAY );
+#endif
 
-	//
-	// make sure our GL state vector is set correctly
-	//
 	memset( &backEnd.glState, 0, sizeof( backEnd.glState ) );
 	backEnd.glState.forceGlState = true;
 
@@ -66,21 +65,28 @@ void RB_SetDefaultGLState( void ) {
 	qglEnable( GL_BLEND );
 	qglEnable( GL_SCISSOR_TEST );
 	qglEnable( GL_CULL_FACE );
+#ifndef GLES3_BACKEND
 	qglDisable( GL_LIGHTING );
 	qglDisable( GL_LINE_STIPPLE );
+#endif
 	qglDisable( GL_STENCIL_TEST );
 
-	qglPolygonMode (GL_FRONT_AND_BACK, GL_FILL);
+#ifndef GLES3_BACKEND
+	qglPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+#endif
 	qglDepthMask( GL_TRUE );
 	qglDepthFunc( GL_ALWAYS );
 
 	qglCullFace( GL_FRONT_AND_BACK );
+#ifndef GLES3_BACKEND
 	qglShadeModel( GL_SMOOTH );
+#endif
 
 	if ( r_useScissor.GetBool() ) {
 		qglScissor( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
 	}
 
+#ifndef GLES3_BACKEND
 	for ( i = glConfig.maxTextureUnits - 1 ; i >= 0 ; i-- ) {
 		GL_SelectTexture( i );
 
@@ -99,6 +105,7 @@ void RB_SetDefaultGLState( void ) {
 			qglDisable( GL_TEXTURE_CUBE_MAP_EXT );
 		}
 	}
+#endif
 }
 
 
@@ -124,9 +131,9 @@ void GL_SelectTexture( int unit ) {
 	}
 
 	qglActiveTextureARB( GL_TEXTURE0_ARB + unit );
-	if ( !glConfig.isGLES3 ) {
-		qglClientActiveTextureARB( GL_TEXTURE0_ARB + unit );
-	}
+#ifndef GLES3_BACKEND
+	qglClientActiveTextureARB( GL_TEXTURE0_ARB + unit );
+#endif
 
 	backEnd.glState.currenttmu = unit;
 }
