@@ -10,6 +10,8 @@ This project explicitly does **not** accept AI-generated code, bug reports, or c
 
 ## Build Commands
 
+**IMPORTANT: Always use `just` tasks to build or test. Never invoke `cmake`, `make`, or compiler commands directly.**
+
 This project uses CMake. All source lives in `neo/`, and builds output to `build/` at the repo root.
 
 **Using the justfile (recommended for macOS development):**
