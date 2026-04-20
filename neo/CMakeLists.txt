@@ -237,10 +237,10 @@ endif()
 if(GLES3)
 	add_definitions(-DGLES3_BACKEND)
 	message(STATUS "OpenGL ES 3.0 backend enabled (runtime proc resolution)")
-	if(IMGUI)
-		message(STATUS "Disabling ImGui for GLES3 build (proper GLES3 ImGui support is Phase 7)")
-		set(IMGUI OFF)
-		add_definitions(-DIMGUI_DISABLE)
+	# imgui_impl_opengl3.cpp calls GLES functions directly; link libGLESv2 to satisfy those.
+	find_library(GLESV2_LIBRARY NAMES GLESv2)
+	if(NOT GLESV2_LIBRARY)
+		message(FATAL_ERROR "libGLESv2 not found — required for GLES3 ImGui backend")
 	endif()
 endif()
 
@@ -1292,8 +1292,12 @@ include_directories(${CMAKE_SOURCE_DIR})
 
 if(GLES3)
 	# Provides <GLES3/gl3.h> via SDL's bundled headers on platforms that lack
-	# system GLES3 headers (e.g., macOS desktop).
-	include_directories(${CMAKE_SOURCE_DIR}/sys/gles3_shim)
+	# system GLES3 headers (e.g., macOS desktop). Only add the shim when the
+	# system does not ship its own GLES3 headers.
+	find_path(GLES3_SYSTEM_INCLUDE_DIR GLES3/gl3.h)
+	if(NOT GLES3_SYSTEM_INCLUDE_DIR)
+		include_directories(${CMAKE_SOURCE_DIR}/sys/gles3_shim)
+	endif()
 endif()
 
 add_library(idlib STATIC ${src_idlib})
@@ -1361,6 +1365,7 @@ endif()
 		${CURL_LIBRARY}
 		${SDLx_LIBRARY}
 		${sys_libs}
+		$<$<BOOL:${GLES3}>:${GLESV2_LIBRARY}>
 	)
 
 	if(NOT APPLE AND NOT WIN32)

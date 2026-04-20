@@ -1233,7 +1233,8 @@ Draw non-light dependent passes
 */
 int RB_STD_DrawShaderPasses( drawSurf_t **drawSurfs, int numDrawSurfs ) {
 #ifdef GLES3_BACKEND
-	return 0;
+	extern int RB_GLES2_DrawShaderPasses( drawSurf_t **drawSurfs, int numDrawSurfs );
+	return RB_GLES2_DrawShaderPasses( drawSurfs, numDrawSurfs );
 #endif
 	int				i;
 
@@ -1265,7 +1266,9 @@ int RB_STD_DrawShaderPasses( drawSurf_t **drawSurfs, int numDrawSurfs ) {
 	globalImages->BindNull();
 
 	GL_SelectTexture( 0 );
+#ifndef GLES3_BACKEND
 	qglEnableClientState( GL_TEXTURE_COORD_ARRAY );
+#endif
 
 	RB_SetProgramEnvironment( isPostProcess );
 
@@ -1294,7 +1297,9 @@ int RB_STD_DrawShaderPasses( drawSurf_t **drawSurfs, int numDrawSurfs ) {
 	}
 
 	GL_Cull( CT_FRONT_SIDED );
+#ifndef GLES3_BACKEND
 	qglColor3f( 1, 1, 1 );
+#endif
 
 	return i;
 }

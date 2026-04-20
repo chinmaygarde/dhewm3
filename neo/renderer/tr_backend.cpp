@@ -198,7 +198,9 @@ void GL_TexEnv( int env ) {
 	case GL_REPLACE:
 	case GL_DECAL:
 	case GL_ADD:
+#ifndef GLES3_BACKEND
 		qglTexEnvi( GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, env );
+#endif
 		break;
 	default:
 		common->Error( "GL_TexEnv: invalid env '%d' passed\n", env );
@@ -352,8 +354,9 @@ void GL_State( int stateBits ) {
 	}
 
 	//
-	// fill/line mode
+	// fill/line mode — not available in GLES3 core
 	//
+#ifndef GLES3_BACKEND
 	if ( diff & GLS_POLYMODE_LINE ) {
 		if ( stateBits & GLS_POLYMODE_LINE ) {
 			qglPolygonMode( GL_FRONT_AND_BACK, GL_LINE );
@@ -361,10 +364,12 @@ void GL_State( int stateBits ) {
 			qglPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 		}
 	}
+#endif
 
 	//
-	// alpha test
+	// alpha test — not available in GLES3 core (requires shader discard)
 	//
+#ifndef GLES3_BACKEND
 	if ( diff & GLS_ATEST_BITS ) {
 		switch ( stateBits & GLS_ATEST_BITS ) {
 		case 0:
@@ -387,6 +392,7 @@ void GL_State( int stateBits ) {
 			break;
 		}
 	}
+#endif
 
 	backEnd.glState.glStateBits = stateBits;
 }
@@ -415,11 +421,13 @@ void RB_SetGL2D( void ) {
 	if ( r_useScissor.GetBool() ) {
 		qglScissor( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
 	}
+#ifndef GLES3_BACKEND
 	qglMatrixMode( GL_PROJECTION );
 	qglLoadIdentity();
 	qglOrtho( 0, 640, 480, 0, 0, 1 );		// always assume 640x480 virtual coordinates
 	qglMatrixMode( GL_MODELVIEW );
 	qglLoadIdentity();
+#endif
 
 	GL_State( GLS_DEPTHFUNC_ALWAYS |
 			  GLS_SRCBLEND_SRC_ALPHA |
@@ -448,7 +456,9 @@ static void	RB_SetBuffer( const void *data ) {
 
 	backEnd.frameCount = cmd->frameCount;
 
+#ifndef GLES3_BACKEND
 	qglDrawBuffer( cmd->buffer );
+#endif
 
 	// clear screen for debugging
 	// automatically enable this with several other debug tools
@@ -477,6 +487,9 @@ was there.  This is used to test for texture thrashing.
 ===============
 */
 void RB_ShowImages( void ) {
+#ifdef GLES3_BACKEND
+	return;
+#endif
 	int		i;
 	idImage	*image;
 	float	x, y, w, h;
@@ -546,6 +559,7 @@ const void	RB_SwapBuffers( const void *data ) {
 	int fillAlpha = r_fillWindowAlphaChan.GetInteger();
 	if ( fillAlpha == 1 || (fillAlpha == -1 && glConfig.shouldFillWindowAlpha) )
 	{
+#ifndef GLES3_BACKEND
 		// make sure the whole alpha chan of the (default) framebuffer is opaque.
 		// at least Wayland needs this, see also the big comment in GLimp_Init()
 
@@ -607,6 +621,7 @@ const void	RB_SwapBuffers( const void *data ) {
 			qglEnable( GL_TEXTURE_2D );
 		if( scissorEnabled )
 			qglEnable( GL_SCISSOR_TEST );
+#endif // !GLES3_BACKEND
 	}
 
 	// force a gl sync if requested

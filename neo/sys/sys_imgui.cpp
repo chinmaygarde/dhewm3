@@ -17,7 +17,19 @@
 
 #include "sys_imgui.h"
 
-#include "../libs/imgui/backends/imgui_impl_opengl2.h"
+#ifdef GLES3_BACKEND
+#  include "../libs/imgui/backends/imgui_impl_opengl3.h"
+#  define ImGui_ImplOpenGLx_Init()                  ImGui_ImplOpenGL3_Init(NULL)
+#  define ImGui_ImplOpenGLx_Shutdown()              ImGui_ImplOpenGL3_Shutdown()
+#  define ImGui_ImplOpenGLx_NewFrame()              ImGui_ImplOpenGL3_NewFrame()
+#  define ImGui_ImplOpenGLx_RenderDrawData(d)       ImGui_ImplOpenGL3_RenderDrawData(d)
+#else
+#  include "../libs/imgui/backends/imgui_impl_opengl2.h"
+#  define ImGui_ImplOpenGLx_Init()                  ImGui_ImplOpenGL2_Init()
+#  define ImGui_ImplOpenGLx_Shutdown()              ImGui_ImplOpenGL2_Shutdown()
+#  define ImGui_ImplOpenGLx_NewFrame()              ImGui_ImplOpenGL2_NewFrame()
+#  define ImGui_ImplOpenGLx_RenderDrawData(d)       ImGui_ImplOpenGL2_RenderDrawData(d)
+#endif
 
 #if SDL_VERSION_ATLEAST(3, 0, 0)
   #include "../libs/imgui/backends/imgui_impl_sdl3.h"
@@ -262,7 +274,7 @@ bool Init(void* _sdlWindow, void* sdlGlContext)
 		return false;
 	}
 
-	if ( ! ImGui_ImplOpenGL2_Init() ) {
+	if ( ! ImGui_ImplOpenGLx_Init() ) {
 		ImGui_ImplSDLx_Shutdown();
 		ImGui::DestroyContext( imguiCtx );
 		imguiCtx = NULL;
@@ -306,7 +318,7 @@ void Shutdown()
 		common->Printf( "Shutting down ImGui\n" );
 
 		// TODO: only if init was successful!
-		ImGui_ImplOpenGL2_Shutdown();
+		ImGui_ImplOpenGLx_Shutdown();
 		ImGui_ImplSDLx_Shutdown();
 		ImGui::DestroyContext( imguiCtx );
 		imgui_initialized = false;
@@ -351,7 +363,7 @@ void NewFrame()
 	}
 
 	// Start the Dear ImGui frame
-	ImGui_ImplOpenGL2_NewFrame();
+	ImGui_ImplOpenGLx_NewFrame();
 
 	if ( ShouldShowCursor() )
 		ImGui::GetIO().ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
@@ -531,6 +543,7 @@ void EndFrame()
 	haveNewFrame = false;
 	ImGui::Render();
 
+#ifndef GLES3_BACKEND
 	// Doom3 uses the OpenGL ARB shader extensions, for most things it renders.
 	// disable those shaders, the OpenGL classic integration of ImGui doesn't use shaders
 	qglDisable( GL_VERTEX_PROGRAM_ARB );
@@ -558,12 +571,15 @@ void EndFrame()
 			qglDisable( GL_TEXTURE_CUBE_MAP_EXT );
 		}
 	}
+#endif // !GLES3_BACKEND
 
-	ImGui_ImplOpenGL2_RenderDrawData( ImGui::GetDrawData() );
+	ImGui_ImplOpenGLx_RenderDrawData( ImGui::GetDrawData() );
 
+#ifndef GLES3_BACKEND
 	if ( curArrayBuffer != 0 ) {
 		qglBindBufferARB( GL_ARRAY_BUFFER_ARB, curArrayBuffer );
 	}
+#endif // !GLES3_BACKEND
 
 	// reset this at the end of each frame, will be set again by ProcessEvent()
 	if ( hadKeyDownEvent ) {

@@ -151,12 +151,13 @@ void RB_RenderTriangleSurface( const srfTriangles_t *tri ) {
 		return;
 	}
 
-
+#ifndef GLES3_BACKEND
 	idDrawVert *ac = (idDrawVert *)vertexCache.Position( tri->ambientCache );
 	qglVertexPointer( 3, GL_FLOAT, sizeof( idDrawVert ), ac->xyz.ToFloatPtr() );
 	qglTexCoordPointer( 2, GL_FLOAT, sizeof( idDrawVert ), ac->st.ToFloatPtr() );
 
 	RB_DrawElementsWithCounters( tri );
+#endif
 }
 
 /*
@@ -177,6 +178,10 @@ RB_EnterWeaponDepthHack
 void RB_EnterWeaponDepthHack() {
 	qglDepthRange( 0, 0.5 );
 
+#ifdef GLES3_BACKEND
+	extern void GLES2_EnterWeaponDepthHack();
+	GLES2_EnterWeaponDepthHack();
+#else
 	float	matrix[16];
 
 	memcpy( matrix, backEnd.viewDef->projectionMatrix, sizeof( matrix ) );
@@ -186,6 +191,7 @@ void RB_EnterWeaponDepthHack() {
 	qglMatrixMode(GL_PROJECTION);
 	qglLoadMatrixf( matrix );
 	qglMatrixMode(GL_MODELVIEW);
+#endif
 }
 
 /*
@@ -196,6 +202,10 @@ RB_EnterModelDepthHack
 void RB_EnterModelDepthHack( float depth ) {
 	qglDepthRange( 0.0f, 1.0f );
 
+#ifdef GLES3_BACKEND
+	extern void GLES2_EnterModelDepthHack( float depth );
+	GLES2_EnterModelDepthHack( depth );
+#else
 	float	matrix[16];
 
 	memcpy( matrix, backEnd.viewDef->projectionMatrix, sizeof( matrix ) );
@@ -205,6 +215,7 @@ void RB_EnterModelDepthHack( float depth ) {
 	qglMatrixMode(GL_PROJECTION);
 	qglLoadMatrixf( matrix );
 	qglMatrixMode(GL_MODELVIEW);
+#endif
 }
 
 /*
@@ -215,9 +226,14 @@ RB_LeaveDepthHack
 void RB_LeaveDepthHack() {
 	qglDepthRange( 0, 1 );
 
+#ifdef GLES3_BACKEND
+	extern void GLES2_LeaveDepthHack();
+	GLES2_LeaveDepthHack();
+#else
 	qglMatrixMode(GL_PROJECTION);
 	qglLoadMatrixf( backEnd.viewDef->projectionMatrix );
 	qglMatrixMode(GL_MODELVIEW);
+#endif
 }
 
 /*
@@ -242,7 +258,9 @@ void RB_RenderDrawSurfListWithFunction( drawSurf_t **drawSurfs, int numDrawSurfs
 
 		// change the matrix if needed
 		if ( drawSurf->space != backEnd.currentSpace ) {
+#ifndef GLES3_BACKEND
 			qglLoadMatrixf( drawSurf->space->modelViewMatrix );
+#endif
 		}
 
 		if ( drawSurf->space->weaponDepthHack ) {
@@ -287,7 +305,9 @@ void RB_RenderDrawSurfChainWithFunction( const drawSurf_t *drawSurfs,
 	for ( drawSurf = drawSurfs ; drawSurf ; drawSurf = drawSurf->nextOnLight ) {
 		// change the matrix if needed
 		if ( drawSurf->space != backEnd.currentSpace ) {
+#ifndef GLES3_BACKEND
 			qglLoadMatrixf( drawSurf->space->modelViewMatrix );
+#endif
 		}
 
 		if ( drawSurf->space->weaponDepthHack ) {
@@ -361,12 +381,14 @@ RB_LoadShaderTextureMatrix
 ======================
 */
 void RB_LoadShaderTextureMatrix( const float *shaderRegisters, const textureStage_t *texture ) {
+#ifndef GLES3_BACKEND
 	float	matrix[16];
 
 	RB_GetShaderTextureMatrix( shaderRegisters, texture, matrix );
 	qglMatrixMode( GL_TEXTURE );
 	qglLoadMatrixf( matrix );
 	qglMatrixMode( GL_MODELVIEW );
+#endif
 }
 
 /*
@@ -412,7 +434,8 @@ void RB_BindStageTexture( const float *shaderRegisters, const textureStage_t *te
 	// image
 	RB_BindVariableStageImage( texture, shaderRegisters );
 
-	// texgens
+#ifndef GLES3_BACKEND
+	// texgens — all fixed-function, not available in GLES3
 	if ( texture->texgen == TG_DIFFUSE_CUBE ) {
 		qglTexCoordPointer( 3, GL_FLOAT, sizeof( idDrawVert ), ((idDrawVert *)vertexCache.Position( surf->geo->ambientCache ))->normal.ToFloatPtr() );
 	}
@@ -442,6 +465,7 @@ void RB_BindStageTexture( const float *shaderRegisters, const textureStage_t *te
 	if ( texture->hasMatrix ) {
 		RB_LoadShaderTextureMatrix( shaderRegisters, texture );
 	}
+#endif // !GLES3_BACKEND
 }
 
 /*
@@ -450,6 +474,7 @@ RB_FinishStageTexture
 ======================
 */
 void RB_FinishStageTexture( const textureStage_t *texture, const drawSurf_t *surf ) {
+#ifndef GLES3_BACKEND
 	if ( texture->texgen == TG_DIFFUSE_CUBE || texture->texgen == TG_SKYBOX_CUBE
 		|| texture->texgen == TG_WOBBLESKY_CUBE ) {
 		qglTexCoordPointer( 2, GL_FLOAT, sizeof( idDrawVert ),
@@ -475,6 +500,7 @@ void RB_FinishStageTexture( const textureStage_t *texture, const drawSurf_t *sur
 		qglLoadIdentity();
 		qglMatrixMode( GL_MODELVIEW );
 	}
+#endif // !GLES3_BACKEND
 }
 
 

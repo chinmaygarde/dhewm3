@@ -124,6 +124,29 @@ static const char* softpartFShader = "!!ARBfp1.0  \n"
 
 #endif // D3_INTEGRATE_SOFTPART_SHADERS
 
+// Flat texture + color shader for ambient/GUI rendering (Phase 7).
+// Uses the same colorMod/colorAdd (env[16/17]) convention as interaction.vfp.
+static const char* flatVShader =
+	"!!ARBvp1.0\n"
+	"OPTION ARB_position_invariant;\n"
+	"PARAM colorMod = program.env[16];\n"
+	"PARAM colorAdd = program.env[17];\n"
+	"TEMP vc;\n"
+	"MUL vc, vertex.color, colorMod;\n"
+	"ADD result.color, vc, colorAdd;\n"
+	"MOV result.texcoord, vertex.texcoord;\n"
+	"END\n";
+
+static const char* flatFShader =
+	"!!ARBfp1.0\n"
+	"# nodhewm3gammahack\n"
+	"PARAM matColor = program.env[0];\n"
+	"TEMP tc;\n"
+	"TEX tc, fragment.texcoord, texture[0], 2D;\n"
+	"MUL tc, tc, fragment.color;\n"
+	"MUL result.color, tc, matColor;\n"
+	"END\n";
+
 // ---------------------------------------------------------------------------
 // Program table — mirrors progs[] in draw_arb2.cpp
 // ---------------------------------------------------------------------------
@@ -152,6 +175,8 @@ static const glesProgramDef_t glesProgDefs[] = {
 	{ GL_FRAGMENT_SHADER, FPROG_GLASSWARP,         "arbFP_glasswarp.txt" },
 	{ GL_VERTEX_SHADER,   VPROG_SOFT_PARTICLE,     NULL }, // inline string
 	{ GL_FRAGMENT_SHADER, FPROG_SOFT_PARTICLE,     NULL }, // inline string
+	{ GL_VERTEX_SHADER,   VPROG_FLAT,              NULL }, // inline string (Phase 7)
+	{ GL_FRAGMENT_SHADER, FPROG_FLAT,              NULL }, // inline string (Phase 7)
 };
 static const int NUM_GLES_PROG_DEFS =
 	(int)( sizeof(glesProgDefs) / sizeof(glesProgDefs[0]) );
@@ -181,6 +206,11 @@ static GLuint s_vao = 0;
 
 // Currently bound VPROG_* ident; -1 means no program is active.
 static int s_currentProgIdent = -1;
+
+// Depth-hack projection matrix — set by GLES2_EnterWeaponDepthHack /
+// GLES2_EnterModelDepthHack and used by GLES2_ComputeAndUploadMVP.
+static float s_hackProjectionMatrix[16];
+static bool  s_inDepthHack = false;
 
 // Fixed attribute locations bound before linking (must match the vertex
 // attribute setup in Phase 4).
@@ -405,6 +435,11 @@ static void R_GLES2_InitPrograms( void ) {
 			src = softpartFShader;
 		}
 #endif
+		if ( def.ident == VPROG_FLAT ) {
+			src = flatVShader;
+		} else if ( def.ident == FPROG_FLAT ) {
+			src = flatFShader;
+		}
 
 		if ( !src && def.name ) {
 			idStr fullPath = "glprogs/";
@@ -561,7 +596,8 @@ static void GLES2_UploadProgramEnv( const glesProgram_t &gp ) {
 // Compute MVP = projection * modelView and upload to the shader's uMVP uniform.
 static void GLES2_ComputeAndUploadMVP( const glesProgram_t &gp, const float *mv ) {
 	if ( gp.uMVPLoc < 0 ) return;
-	const float *proj = backEnd.viewDef->projectionMatrix;
+	const float *proj = s_inDepthHack ? s_hackProjectionMatrix
+	                                  : backEnd.viewDef->projectionMatrix;
 	float mvp[16];
 	for ( int c = 0; c < 4; c++ )
 		for ( int r = 0; r < 4; r++ ) {
@@ -748,6 +784,29 @@ void RB_GLES2_FillDepthBuffer( drawSurf_t **drawSurfs, int numDrawSurfs ) {
 }
 
 // ---------------------------------------------------------------------------
+// Depth-hack helpers — called from tr_render.cpp instead of qglMatrixMode/qglLoadMatrixf.
+// ---------------------------------------------------------------------------
+
+void GLES2_EnterWeaponDepthHack() {
+	qglDepthRange( 0, 0.5 );
+	memcpy( s_hackProjectionMatrix, backEnd.viewDef->projectionMatrix, 64 );
+	s_hackProjectionMatrix[14] *= 0.25f;
+	s_inDepthHack = true;
+}
+
+void GLES2_EnterModelDepthHack( float depth ) {
+	qglDepthRange( 0.0f, 1.0f );
+	memcpy( s_hackProjectionMatrix, backEnd.viewDef->projectionMatrix, 64 );
+	s_hackProjectionMatrix[14] -= depth;
+	s_inDepthHack = true;
+}
+
+void GLES2_LeaveDepthHack() {
+	qglDepthRange( 0, 1 );
+	s_inDepthHack = false;
+}
+
+// ---------------------------------------------------------------------------
 // CPU-side program.env[] mirror — called instead of qglProgramEnvParameter4fvARB
 // ---------------------------------------------------------------------------
 
@@ -758,6 +817,144 @@ void GLES2_SetProgramEnv( int index, const float *v ) {
 		s_programEnv[index][2] = v[2];
 		s_programEnv[index][3] = v[3];
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7: ambient/GUI shader pass (replaces RB_STD_T_RenderShaderPasses for GLES3)
+// ---------------------------------------------------------------------------
+
+static void RB_GLES2_T_RenderShaderPasses( const drawSurf_t *surf ) {
+	const idMaterial *shader = surf->material;
+	if ( !shader->HasAmbient() || shader->IsPortalSky() ) return;
+
+	const srfTriangles_t *tri = surf->geo;
+	if ( !tri->numIndexes || !tri->ambientCache ) return;
+
+	const float *regs = surf->shaderRegisters;
+	GL_Cull( shader->GetCullType() );
+
+	if ( shader->TestMaterialFlag(MF_POLYGONOFFSET) ) {
+		qglEnable( GL_POLYGON_OFFSET_FILL );
+		qglPolygonOffset( r_offsetFactor.GetFloat(),
+		                  r_offsetUnits.GetFloat() * shader->GetPolygonOffset() );
+	}
+
+	if ( surf->space->weaponDepthHack ) {
+		GLES2_EnterWeaponDepthHack();
+	} else if ( surf->space->modelDepthHack != 0.0f ) {
+		GLES2_EnterModelDepthHack( surf->space->modelDepthHack );
+	}
+
+	const glesProgram_t *gp = GLES2_UseProgram( VPROG_FLAT );
+	if ( !gp ) goto done;
+
+	{
+		idDrawVert *ac = (idDrawVert *)vertexCache.Position( tri->ambientCache );
+		GLES2_SetupInteractionAttribs( ac );
+		GLES2_ComputeAndUploadMVP( *gp, surf->space->modelViewMatrix );
+	}
+
+	for ( int stage = 0; stage < shader->GetNumStages(); stage++ ) {
+		const shaderStage_t *pStage = shader->GetStage( stage );
+		if ( !regs[ pStage->conditionRegister ] ) continue;
+		if ( pStage->lighting != SL_AMBIENT ) continue;
+		if ( ( pStage->drawStateBits & (GLS_SRCBLEND_BITS|GLS_DSTBLEND_BITS) ) ==
+		     ( GLS_SRCBLEND_ZERO | GLS_DSTBLEND_ONE ) ) continue;
+
+		// newStage and soft-particle both require ARB programs; skip on GLES3
+		if ( pStage->newStage ) continue;
+		if ( ( surf->dsFlags & DSF_SOFT_PARTICLE ) &&
+		     surf->particle_radius > 0.0f &&
+		     !pStage->newStage ) {
+			// soft particle path also requires ARB — skip
+		}
+
+		float color[4] = {
+			regs[ pStage->color.registers[0] ],
+			regs[ pStage->color.registers[1] ],
+			regs[ pStage->color.registers[2] ],
+			regs[ pStage->color.registers[3] ]
+		};
+
+		if ( ( pStage->drawStateBits & (GLS_SRCBLEND_BITS|GLS_DSTBLEND_BITS) ) ==
+		     ( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE ) &&
+		     color[0] <= 0 && color[1] <= 0 && color[2] <= 0 ) continue;
+
+		static const float zero[4]   = {  0,  0,  0, 0 };
+		static const float one[4]    = {  1,  1,  1, 1 };
+		static const float negOne[4] = { -1, -1, -1, 1 };
+
+		switch ( pStage->vertexColor ) {
+		case SVC_IGNORE:
+			GLES2_SetProgramEnv( PP_COLOR_MODULATE, zero );
+			GLES2_SetProgramEnv( PP_COLOR_ADD,      one );
+			break;
+		case SVC_MODULATE:
+			GLES2_SetProgramEnv( PP_COLOR_MODULATE, one );
+			GLES2_SetProgramEnv( PP_COLOR_ADD,      zero );
+			break;
+		case SVC_INVERSE_MODULATE:
+			GLES2_SetProgramEnv( PP_COLOR_MODULATE, negOne );
+			GLES2_SetProgramEnv( PP_COLOR_ADD,      one );
+			break;
+		}
+
+		GLES2_SetProgramEnv( 0, color );
+		GLES2_UploadProgramEnv( *gp );
+
+		GL_SelectTexture( 0 );
+		RB_BindVariableStageImage( &pStage->texture, regs );
+
+		GL_State( pStage->drawStateBits );
+		RB_DrawElementsWithCounters( tri );
+	}
+
+done:
+	if ( shader->TestMaterialFlag(MF_POLYGONOFFSET) )
+		qglDisable( GL_POLYGON_OFFSET_FILL );
+	if ( surf->space->weaponDepthHack || surf->space->modelDepthHack != 0.0f )
+		GLES2_LeaveDepthHack();
+}
+
+// Exported — called from RB_STD_DrawShaderPasses in draw_common.cpp.
+int RB_GLES2_DrawShaderPasses( drawSurf_t **drawSurfs, int numDrawSurfs ) {
+	extern void RB_SetProgramEnvironment( bool isPostProcess );
+
+	if ( backEnd.viewDef->viewEntitys && r_skipAmbient.GetBool() )
+		return numDrawSurfs;
+
+	RB_SetProgramEnvironment( false );
+
+	backEnd.currentSpace = NULL;
+	int i;
+	for ( i = 0; i < numDrawSurfs; i++ ) {
+		if ( drawSurfs[i]->material->SuppressInSubview() ) continue;
+
+		if ( backEnd.viewDef->isXraySubview && drawSurfs[i]->space->entityDef ) {
+			if ( drawSurfs[i]->space->entityDef->parms.xrayIndex != 2 ) continue;
+		}
+
+		if ( drawSurfs[i]->material->GetSort() >= SS_POST_PROCESS
+		     && !backEnd.currentRenderCopied ) break;
+
+		if ( r_useScissor.GetBool() &&
+		     !backEnd.currentScissor.Equals( drawSurfs[i]->scissorRect ) ) {
+			backEnd.currentScissor = drawSurfs[i]->scissorRect;
+			qglScissor(
+				backEnd.viewDef->viewport.x1 + backEnd.currentScissor.x1,
+				backEnd.viewDef->viewport.y1 + backEnd.currentScissor.y1,
+				backEnd.currentScissor.x2 + 1 - backEnd.currentScissor.x1,
+				backEnd.currentScissor.y2 + 1 - backEnd.currentScissor.y1 );
+		}
+
+		RB_GLES2_T_RenderShaderPasses( drawSurfs[i] );
+		backEnd.currentSpace = drawSurfs[i]->space;
+	}
+
+	GL_Cull( CT_FRONT_SIDED );
+	qglUseProgram( 0 );
+	s_currentProgIdent = -1;
+	return i;
 }
 
 // ---------------------------------------------------------------------------

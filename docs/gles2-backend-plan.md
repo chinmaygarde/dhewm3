@@ -1,6 +1,6 @@
 > **Note**: This is a rough plan. It has not been reviewed for correctness or completeness, and details will change as implementation progresses.
 >
-> **Progress**: Phase 1 complete (commit `2efe8e2`). Phase 2 complete (commit `8aa8146`). Phase 3 complete (commit `8aa8146`). Phase 4 complete (commit `9b24bc3`). Phase 5 complete (commit `16e0c5f`).
+> **Progress**: Phase 1 complete (commit `2efe8e2`). Phase 2 complete (commit `8aa8146`). Phase 3 complete (commit `8aa8146`). Phase 4 complete (commit `9b24bc3`). Phase 5 complete (commit `16e0c5f`). Phase 6 complete. Phase 7 complete.
 
 # OpenGL ES 3.0 Backend Port for dhewm3
 
@@ -166,27 +166,44 @@ This is a large project structured into 7 phases. Each phase is independently bu
 
 ---
 
-### Phase 7: Remaining Fixed-Function Removal & Polish
+### Phase 7: Remaining Fixed-Function Removal & Polish ✅
 
 **Goal**: Eliminate all remaining desktop-GL-only calls from the GLES3 path.
 
-**Items**:
-- `glMatrixMode` / `glLoadMatrix` / `glOrtho` / `glFrustum`: these appear in `tr_backend.cpp` and `draw_common.cpp`. Under GLES3: compute matrices in C++ (already have `idMath`, `idVec4`, `idMat4`) and pass as shader uniforms (`uModelViewProjection`, `uTextureMatrix`)
-- `glColor4f` / `glColor4ub`: pass as vertex attribute or uniform `uColor` in the color shader
-- `glPolygonOffset`: available in GLES3 core — no change needed
-- `glScissor`, `glViewport`, `glDepthRange`: available in GLES3 core — no change needed
-- `glLineWidth`: available but behavior may differ; acceptable
-- `glReadPixels`: available in GLES3 (limited formats) — screenshot code may need format adjustment
-- **ImGui**: swap to `imgui_impl_opengl3.cpp` compiled with `IMGUI_IMPL_OPENGL_ES3` define; add `#define IMGUI_IMPL_OPENGL_ES3` before include in the GLES3 CMake path
-- **Gamma/brightness**: dhewm3's gamma-in-shader hack patches the ARB text before it reaches the translator (`draw_arb2.cpp:574`); the translator handles the patched instructions automatically — no extra work needed
+**Status**: Complete. Both `just build-gles3` and `just build-arb` pass cleanly.
 
-**Files to modify**:
-- `neo/renderer/tr_backend.cpp`
-- `neo/renderer/draw_common.cpp`
-- `neo/renderer/RenderSystem_init.cpp`
-- `neo/CMakeLists.txt` (ImGui backend swap)
+**Completed items**:
+- ✅ `qglPolygonMode`, `qglAlphaFunc`/alpha-test block guarded in `GL_State` (`tr_backend.cpp`)
+- ✅ `qglTexEnvi` guarded in `GL_TexEnv` (`tr_backend.cpp`)
+- ✅ `qglDrawBuffer` guarded in `RB_SetBuffer` (`tr_backend.cpp`)
+- ✅ `qglMatrixMode`/`qglLoadIdentity`/`qglOrtho` guarded in `RB_SetGL2D` (`tr_backend.cpp`)
+- ✅ `RB_ShowImages` returns early for GLES3 (`tr_backend.cpp`)
+- ✅ `RB_SwapBuffers` fillWindowAlpha block guarded (`tr_backend.cpp`)
+- ✅ `RB_EnterWeaponDepthHack`, `RB_EnterModelDepthHack`, `RB_LeaveDepthHack` dispatch to GLES3 helpers (`tr_render.cpp`)
+- ✅ `qglLoadMatrixf` guarded in `RB_RenderDrawSurfListWithFunction` and `RB_RenderDrawSurfChainWithFunction` (`tr_render.cpp`)
+- ✅ `RB_LoadShaderTextureMatrix`, `RB_BindStageTexture` texgen/matrix block, `RB_FinishStageTexture` all guarded (`tr_render.cpp`)
+- ✅ `RB_RenderTriangleSurface` vertex/texcoord pointer code guarded (`tr_render.cpp`)
+- ✅ `qglEnableClientState(GL_TEXTURE_COORD_ARRAY)` and `qglColor3f` guarded in `RB_STD_DrawShaderPasses` (`draw_common.cpp`)
+- ✅ `RB_STD_DrawShaderPasses` dispatches to `RB_GLES2_DrawShaderPasses` for GLES3 (`draw_common.cpp`)
+- ✅ Flat inline ARB shaders (`VPROG_FLAT`/`FPROG_FLAT`) for ambient/GUI rendering (`draw_gles3.cpp`)
+- ✅ `RB_GLES2_T_RenderShaderPasses` and `RB_GLES2_DrawShaderPasses` implemented (`draw_gles3.cpp`)
+- ✅ Depth-hack helpers (`GLES2_EnterWeaponDepthHack`, `GLES2_EnterModelDepthHack`, `GLES2_LeaveDepthHack`) implemented; `GLES2_ComputeAndUploadMVP` uses `s_hackProjectionMatrix` when active (`draw_gles3.cpp`)
+- ✅ ImGui enabled for GLES3: CMake suppression block removed; `imgui_impl_opengl3.cpp` + `-DIMGUI_IMPL_OPENGL_ES3` selected; `sys_imgui.cpp` conditionally routes to `ImGui_ImplOpenGL3_*`; libGLESv2 linked (`CMakeLists.txt`, `sys_imgui.cpp`)
+- ✅ gles3_shim include path only applied when system GLES3 headers are absent (`CMakeLists.txt`)
 
-**Verification**: Full scene renders without GL errors (`GL_NO_ERROR` each frame); all shadow, interaction, ambient, and GUI passes work.
+**Deferred (post-Phase-7)**:
+- Alpha-discard via shader `discard` for alpha-masked surfaces (currently alpha-blends instead)
+- Fog lights (`RB_STD_FogAllLights` returns early; shader-based fog not yet implemented)
+- `RB_ShowImages` debug view disabled for GLES3
+
+**Files modified**:
+- `neo/renderer/tr_local.h` — added `VPROG_FLAT`, `FPROG_FLAT` to `program_t` enum
+- `neo/renderer/draw_gles3.cpp` — flat shaders, depth hacks, ambient draw pass
+- `neo/renderer/draw_common.cpp` — GLES3 dispatch, guarded client-state calls
+- `neo/renderer/tr_backend.cpp` — guarded all desktop-only GL calls
+- `neo/renderer/tr_render.cpp` — guarded matrix calls, wired GLES3 depth hacks
+- `neo/CMakeLists.txt` — enabled ImGui, libGLESv2 linkage, conditional gles3_shim include
+- `neo/sys/sys_imgui.cpp` — conditional OpenGL2/OpenGL3 ImGui backend routing
 
 ---
 

@@ -1336,6 +1336,9 @@ typedef enum {
 	// SteveL #3878: soft particles
 	VPROG_SOFT_PARTICLE,
 	FPROG_SOFT_PARTICLE,
+	// Phase 7: flat texture+color shader for GLES3 ambient/GUI rendering
+	VPROG_FLAT,
+	FPROG_FLAT,
 	//
 	PROG_USER
 } program_t;
