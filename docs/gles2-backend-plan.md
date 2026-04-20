@@ -1,6 +1,6 @@
 > **Note**: This is a rough plan. It has not been reviewed for correctness or completeness, and details will change as implementation progresses.
 >
-> **Progress**: Phase 1 complete (commit `2efe8e2`). Phase 2 complete (commit `8aa8146`). Phase 3 complete (commit `8aa8146`). Phase 4 complete (commit `9b24bc3`).
+> **Progress**: Phase 1 complete (commit `2efe8e2`). Phase 2 complete (commit `8aa8146`). Phase 3 complete (commit `8aa8146`). Phase 4 complete (commit `9b24bc3`). Phase 5 complete (commit `16e0c5f`).
 
 # OpenGL ES 3.0 Backend Port for dhewm3
 
@@ -127,7 +127,7 @@ This is a large project structured into 7 phases. Each phase is independently bu
 
 ---
 
-### Phase 5: Texture System Adaptation
+### Phase 5: Texture System Adaptation ✅ COMPLETE (commit `16e0c5f`)
 
 **Goal**: Handle GLES3 texture format constraints.
 
