@@ -416,16 +416,37 @@ static void R_GLES2_InitPrograms( void ) {
 			continue;
 		}
 
+		// .vfp files contain both a vertex and fragment program concatenated.
+		// Extract only the half that matches this entry, mirroring draw_arb2.cpp.
+		char *extracted = NULL;
+		{
+			const char *marker = isFragment ? "!!ARBfp" : "!!ARBvp";
+			const char *progStart = strstr( src, marker );
+			if ( progStart ) {
+				const char *progEnd = strstr( progStart, "END" );
+				if ( progEnd ) {
+					int len = (int)( progEnd - progStart ) + 3; // include "END"
+					extracted = new char[ len + 1 ];
+					memcpy( extracted, progStart, len );
+					extracted[ len ] = '\0';
+					src = extracted;
+				}
+			}
+		}
+
 		// Apply gamma hack for fragment shaders
 		if ( isFragment ) {
 			patched = ApplyGammaHack( src );
 		}
 
 		const char *finalSrc = patched ? patched : src;
+
 		GLuint shader = R_GLES2_TranslateAndCompile( finalSrc, isFragment );
 
 		delete[] patched;
 		patched = NULL;
+		delete[] extracted;
+		extracted = NULL;
 
 		if ( fileBuffer ) {
 			fileSystem->FreeFile( fileBuffer );

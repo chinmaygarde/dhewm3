@@ -124,7 +124,9 @@ void GL_SelectTexture( int unit ) {
 	}
 
 	qglActiveTextureARB( GL_TEXTURE0_ARB + unit );
-	qglClientActiveTextureARB( GL_TEXTURE0_ARB + unit );
+	if ( !glConfig.isGLES3 ) {
+		qglClientActiveTextureARB( GL_TEXTURE0_ARB + unit );
+	}
 
 	backEnd.glState.currenttmu = unit;
 }

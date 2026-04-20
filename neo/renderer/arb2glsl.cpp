@@ -66,6 +66,8 @@ static idList<arbSampler_t> s_samplers;
 static idList<idStr>        s_temps;
 static int  s_maxEnvIndex;       // highest program.env[N] index seen (-1 = none)
 static bool s_positionInvariant; // OPTION ARB_position_invariant present
+static bool s_needsMVPRows;      // state.matrix.mvp.row[N] referenced → uniform vec4 uMVPRows[4]
+static bool s_isFragment;        // true when translating a fragment program
 
 // vertex program inputs / outputs
 static bool s_needsPosition;
@@ -75,12 +77,12 @@ static bool s_needsNormal;
 static bool s_needsTangent;
 static bool s_needsBitangent;
 static bool s_needsColor;
-static bool s_writesTexCoord;    // result.texcoord written → emit vTexCoord0 varying
+static int  s_maxWriteTexCoord;  // highest result.texcoord[N] index written (-1 = none)
 static bool s_writesVaryingColor;// result.color in VP → vColor varying to FP
 
 // fragment program inputs
 static bool s_needsFragPos;
-static bool s_needsFragTexCoord;
+static int  s_maxReadTexCoord;   // highest fragment.texcoord[N] index read (-1 = none)
 static bool s_needsFragColor;
 
 static void ResetState( void ) {
@@ -89,6 +91,8 @@ static void ResetState( void ) {
 	s_temps.Clear();
 	s_maxEnvIndex       = -1;
 	s_positionInvariant = false;
+	s_needsMVPRows      = false;
+	s_isFragment        = false;
 	s_needsPosition     = false;
 	s_needsTexCoord0    = false;
 	s_needsTexCoord1    = false;
@@ -96,10 +100,10 @@ static void ResetState( void ) {
 	s_needsTangent      = false;
 	s_needsBitangent    = false;
 	s_needsColor        = false;
-	s_writesTexCoord    = false;
+	s_maxWriteTexCoord  = -1;
 	s_writesVaryingColor= false;
 	s_needsFragPos      = false;
-	s_needsFragTexCoord = false;
+	s_maxReadTexCoord   = -1;
 	s_needsFragColor    = false;
 }
 
@@ -251,6 +255,10 @@ static idStr TranslateOperand( const char *arb ) {
 		glsl = "aPosition";
 		glsl += swizzle;
 		s_needsPosition = true;
+	} else if ( idStr::Icmp( base.c_str(), "vertex.attrib[8]" ) == 0 ) {
+		glsl = "aTexCoord0";
+		glsl += swizzle;
+		s_needsTexCoord0 = true;
 	} else if ( idStr::Icmp( base.c_str(), "vertex.texcoord[0]" ) == 0
 	            || idStr::Icmp( base.c_str(), "vertex.texcoord" ) == 0 ) {
 		glsl = "aTexCoord0";
@@ -272,15 +280,24 @@ static idStr TranslateOperand( const char *arb ) {
 		glsl = "aBitangent";
 		glsl += swizzle;
 		s_needsBitangent = true;
+	} else if ( idStr::Icmp( base.c_str(), "vertex.attrib[11]" ) == 0 ) {
+		glsl = "aNormal";
+		glsl += swizzle;
+		s_needsNormal = true;
 	} else if ( idStr::Icmp( base.c_str(), "vertex.color" ) == 0 ) {
 		glsl = "aColor";
 		glsl += swizzle;
 		s_needsColor = true;
-	} else if ( idStr::Icmp( base.c_str(), "fragment.texcoord" ) == 0
-	            || idStr::Icmpn( base.c_str(), "fragment.texcoord[", 18 ) == 0 ) {
+	} else if ( idStr::Icmp( base.c_str(), "fragment.texcoord" ) == 0 ) {
 		glsl = "vTexCoord0";
 		glsl += swizzle;
-		s_needsFragTexCoord = true;
+		if ( s_maxReadTexCoord < 0 ) s_maxReadTexCoord = 0;
+	} else if ( idStr::Icmpn( base.c_str(), "fragment.texcoord[", 18 ) == 0 ) {
+		int idx = atoi( base.c_str() + 18 );
+		char buf[16]; idStr::snPrintf( buf, sizeof(buf), "vTexCoord%d", idx );
+		glsl = buf;
+		glsl += swizzle;
+		if ( idx > s_maxReadTexCoord ) s_maxReadTexCoord = idx;
 	} else if ( idStr::Icmp( base.c_str(), "fragment.color" ) == 0 ) {
 		glsl = "vColor";
 		glsl += swizzle;
@@ -293,13 +310,30 @@ static idStr TranslateOperand( const char *arb ) {
 		glsl = "gl_Position";
 		glsl += swizzle;
 	} else if ( idStr::Icmp( base.c_str(), "result.color" ) == 0 ) {
-		glsl = "fragColor";
+		// In VP: color varying output (vColor); in FP: fragment color output (fragColor)
+		if ( s_isFragment ) {
+			glsl = "fragColor";
+		} else {
+			glsl = "vColor";
+			s_writesVaryingColor = true;
+		}
 		glsl += swizzle;
 	} else if ( idStr::Icmpn( base.c_str(), "result.texcoord", 15 ) == 0 ) {
 		// result.texcoord or result.texcoord[N]
-		glsl = "vTexCoord0";
+		int idx = 0;
+		if ( base.Length() > 15 && base[15] == '[' ) {
+			idx = atoi( base.c_str() + 16 );
+		}
+		char buf[16]; idStr::snPrintf( buf, sizeof(buf), "vTexCoord%d", idx );
+		glsl = buf;
 		glsl += swizzle;
-		s_writesTexCoord = true;
+		if ( idx > s_maxWriteTexCoord ) s_maxWriteTexCoord = idx;
+	} else if ( idStr::Icmpn( base.c_str(), "state.matrix.mvp.row[", 21 ) == 0 ) {
+		int idx = atoi( base.c_str() + 21 );
+		char buf[32]; idStr::snPrintf( buf, sizeof(buf), "uMVPRows[%d]", idx );
+		glsl = buf;
+		glsl += swizzle;
+		s_needsMVPRows = true;
 	} else if ( idStr::Icmpn( base.c_str(), "program.env[", 12 ) == 0 ) {
 		// Extract index N from program.env[N]
 		int idx = atoi( base.c_str() + 12 );
@@ -362,22 +396,109 @@ static void ScanOperand( const char *tok ) {
 	if (swizzleAt) base.Append(tok, (int)(swizzleAt - tok));
 	else base = tok;
 
-	if ( idStr::Icmpn( base.c_str(), "vertex.texcoord[1]", 18 ) == 0 ) s_needsTexCoord1 = true;
+	if ( idStr::Icmp( base.c_str(), "vertex.attrib[8]" ) == 0 ) s_needsTexCoord0 = true;
+	else if ( idStr::Icmpn( base.c_str(), "vertex.texcoord[1]", 18 ) == 0 ) s_needsTexCoord1 = true;
 	else if ( idStr::Icmpn( base.c_str(), "vertex.texcoord", 15 ) == 0 ) s_needsTexCoord0 = true;
 	else if ( idStr::Icmpn( base.c_str(), "vertex.position", 15 ) == 0 ) s_needsPosition = true;
 	else if ( idStr::Icmpn( base.c_str(), "vertex.normal", 13 ) == 0 ) s_needsNormal = true;
 	else if ( idStr::Icmpn( base.c_str(), "vertex.attrib[9]", 16 ) == 0 ) s_needsTangent = true;
 	else if ( idStr::Icmpn( base.c_str(), "vertex.attrib[10]", 17 ) == 0 ) s_needsBitangent = true;
+	else if ( idStr::Icmpn( base.c_str(), "vertex.attrib[11]", 17 ) == 0 ) s_needsNormal = true;
 	else if ( idStr::Icmpn( base.c_str(), "vertex.color", 12 ) == 0 ) s_needsColor = true;
-	else if ( idStr::Icmpn( base.c_str(), "fragment.texcoord", 17 ) == 0 ) s_needsFragTexCoord = true;
-	else if ( idStr::Icmpn( base.c_str(), "fragment.color", 14 ) == 0 ) s_needsFragColor = true;
+	else if ( idStr::Icmp( base.c_str(), "fragment.texcoord" ) == 0 ) {
+		if ( s_maxReadTexCoord < 0 ) s_maxReadTexCoord = 0;
+	} else if ( idStr::Icmpn( base.c_str(), "fragment.texcoord[", 18 ) == 0 ) {
+		int idx = atoi( base.c_str() + 18 );
+		if ( idx > s_maxReadTexCoord ) s_maxReadTexCoord = idx;
+	} else if ( idStr::Icmpn( base.c_str(), "fragment.color", 14 ) == 0 ) s_needsFragColor = true;
 	else if ( idStr::Icmpn( base.c_str(), "fragment.position", 17 ) == 0 ) s_needsFragPos = true;
-	else if ( idStr::Icmpn( base.c_str(), "result.texcoord", 15 ) == 0 ) s_writesTexCoord = true;
-	else if ( idStr::Icmp( base.c_str(), "result.color" ) == 0 ) s_writesVaryingColor = true;
+	else if ( idStr::Icmpn( base.c_str(), "result.texcoord", 15 ) == 0 ) {
+		int idx = 0;
+		const char *b = base.c_str();
+		if ( b[15] == '[' ) idx = atoi( b + 16 );
+		if ( idx > s_maxWriteTexCoord ) s_maxWriteTexCoord = idx;
+	} else if ( idStr::Icmp( base.c_str(), "result.color" ) == 0 ) s_writesVaryingColor = true;
+	else if ( idStr::Icmpn( base.c_str(), "state.matrix.mvp.row[", 21 ) == 0 ) s_needsMVPRows = true;
 	else if ( idStr::Icmpn( base.c_str(), "program.env[", 12 ) == 0 ) {
 		int idx = atoi( base.c_str() + 12 );
 		if ( idx > s_maxEnvIndex ) s_maxEnvIndex = idx;
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Write-mask / scalar helpers
+// ---------------------------------------------------------------------------
+
+// Extract the write-mask suffix from a translated destination operand.
+// e.g. "vTexCoord0.xyz" → ".xyz",  "R0" → ""
+static idStr GetWriteMask( const idStr &dst ) {
+	int n = dst.Length();
+	int i = n;
+	while ( i > 0 ) {
+		char c = dst[i-1];
+		if ( c=='x'||c=='y'||c=='z'||c=='w'||c=='r'||c=='g'||c=='b'||c=='a' ) { i--; }
+		else break;
+	}
+	if ( i > 0 && dst[i-1] == '.' && i < n ) {
+		return dst.c_str() + i - 1; // includes the leading dot
+	}
+	return idStr("");
+}
+
+// Count swizzle components in a mask like ".xy" → 2, ".x" → 1, "" → 4.
+static int MaskComponents( const idStr &mask ) {
+	if ( mask.Length() == 0 ) return 4;
+	int n = 0;
+	for ( int i = 1; i < mask.Length(); i++ ) {
+		char c = mask[i];
+		if ( c=='x'||c=='y'||c=='z'||c=='w'||c=='r'||c=='g'||c=='b'||c=='a' ) n++;
+	}
+	return n;
+}
+
+// True when expr ends with a single-component swizzle (.x/.y/.z/.w/etc.).
+static bool IsScalarExpr( const idStr &expr ) {
+	int n = expr.Length();
+	return n >= 2 && expr[n-2] == '.' &&
+	       (expr[n-1]=='x'||expr[n-1]=='y'||expr[n-1]=='z'||expr[n-1]=='w'||
+	        expr[n-1]=='r'||expr[n-1]=='g'||expr[n-1]=='b'||expr[n-1]=='a');
+}
+
+// Wrap an expression with a write-mask swizzle so LHS and RHS types agree.
+// When the RHS is already scalar and dst is single-component, no conversion
+// is needed.  When the RHS is scalar but dst is multi-component, we broadcast
+// via vec4() before extracting.
+static idStr MaskRHS( const idStr &rhs, const idStr &mask ) {
+	if ( mask.Length() == 0 ) {
+		// No write mask = full vec4 destination; scalar RHS must be broadcast
+		if ( IsScalarExpr( rhs ) ) {
+			idStr r = "vec4("; r += rhs; r += ")"; return r;
+		}
+		return rhs;
+	}
+	int dstComps = MaskComponents( mask );
+	if ( IsScalarExpr( rhs ) ) {
+		if ( dstComps == 1 ) return rhs; // scalar → scalar: no wrapping needed
+		// scalar → multi-component: broadcast first
+		idStr r = "vec4("; r += rhs; r += ")"; r += mask;
+		return r;
+	}
+	idStr r = "("; r += rhs; r += ")"; r += mask;
+	return r;
+}
+
+// Return a scalar (float) expression from an operand.  When the translated
+// operand already ends with a single-component swizzle the extra ".x" that
+// RCP/RSQ/EXP/LOG need is omitted to avoid "(tmp.x).x".
+static idStr ToScalar( const idStr &a ) {
+	int n = a.Length();
+	if ( n >= 2 && a[n-2] == '.' ) {
+		char c = a[n-1];
+		if ( c=='x'||c=='y'||c=='z'||c=='w'||c=='r'||c=='g'||c=='b'||c=='a' )
+			return a; // already scalar
+	}
+	idStr r = "("; r += a; r += ").x";
+	return r;
 }
 
 // ---------------------------------------------------------------------------
@@ -409,140 +530,142 @@ static void TranslateInstruction( const char *line, bool isFragment, idStr &body
 	p = SkipCommaOrWhitespace( p );
 	p = ReadToken( p, rawDst );
 
-	// Translate destination
-	idStr dst = TranslateOperand( rawDst.c_str() );
+	// Translate destination and extract its write mask so we can apply the
+	// same mask to the RHS (GLSL types must match: e.g. dst.x = rhs.x).
+	idStr dst  = TranslateOperand( rawDst.c_str() );
+	idStr mask = GetWriteMask( dst );
 
-	// Helper lambda-style function via local auto is C++11.
-	// Use inline reads instead.
+	// Helper macro to read the next comma-separated source token.
 	#define READ_SRC(var) \
 		p = SkipCommaOrWhitespace( p ); \
 		p = ReadToken( p, var );
 
+	// Macro to emit a complete assignment: applies write-mask to rhs, handles _SAT.
+	// 'rhsExpr' is the full vec4 RHS expression as an idStr.
+	#define EMIT(rhsExpr) \
+		do { \
+			idStr _r = (rhsExpr); \
+			if (sat) { idStr _s = "clamp("; _s += _r; _s += ", 0.0, 1.0)"; _r = _s; } \
+			body += "    "; body += dst; body += " = "; body += MaskRHS(_r, mask); body += ";\n"; \
+		} while(0)
+
 	if ( idStr::Icmp( baseOp.c_str(), "MOV" ) == 0 ) {
 		READ_SRC(rawA);
 		idStr a = TranslateOperand( rawA.c_str() );
-		body += "    "; body += dst; body += " = ";
-		if (sat) { body += "clamp("; body += a; body += ", 0.0, 1.0)"; }
-		else      { body += a; }
-		body += ";\n";
+		EMIT(a);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "ADD" ) == 0 ) {
 		READ_SRC(rawA); READ_SRC(rawB);
 		idStr a = TranslateOperand(rawA.c_str()), b = TranslateOperand(rawB.c_str());
-		body += "    "; body += dst; body += " = ";
-		if (sat) { body += "clamp("; body += a; body += " + "; body += b; body += ", 0.0, 1.0)"; }
-		else      { body += a; body += " + "; body += b; }
-		body += ";\n";
+		idStr rhs; rhs += a; rhs += " + "; rhs += b;
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "SUB" ) == 0 ) {
 		READ_SRC(rawA); READ_SRC(rawB);
 		idStr a = TranslateOperand(rawA.c_str()), b = TranslateOperand(rawB.c_str());
-		body += "    "; body += dst; body += " = ";
-		if (sat) { body += "clamp("; body += a; body += " - "; body += b; body += ", 0.0, 1.0)"; }
-		else      { body += a; body += " - "; body += b; }
-		body += ";\n";
+		idStr rhs; rhs += a; rhs += " - "; rhs += b;
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "MUL" ) == 0 ) {
 		READ_SRC(rawA); READ_SRC(rawB);
 		idStr a = TranslateOperand(rawA.c_str()), b = TranslateOperand(rawB.c_str());
-		body += "    "; body += dst; body += " = ";
-		if (sat) { body += "clamp("; body += a; body += " * "; body += b; body += ", 0.0, 1.0)"; }
-		else      { body += a; body += " * "; body += b; }
-		body += ";\n";
+		idStr rhs; rhs += a; rhs += " * "; rhs += b;
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "MAD" ) == 0 ) {
 		READ_SRC(rawA); READ_SRC(rawB); READ_SRC(rawC);
 		idStr a = TranslateOperand(rawA.c_str()), b = TranslateOperand(rawB.c_str()),
 		      c = TranslateOperand(rawC.c_str());
-		body += "    "; body += dst; body += " = ";
 		idStr rhs; rhs += a; rhs += " * "; rhs += b; rhs += " + "; rhs += c;
-		if (sat) { body += "clamp("; body += rhs; body += ", 0.0, 1.0)"; }
-		else      { body += rhs; }
-		body += ";\n";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "DP3" ) == 0 ) {
 		READ_SRC(rawA); READ_SRC(rawB);
 		idStr a = TranslateOperand(rawA.c_str()), b = TranslateOperand(rawB.c_str());
-		// Strip any existing swizzle from a/b for the dot — DP3 always uses .xyz
-		// The simplest correct approach: call dot on the full vec4 operands with .xyz forced.
-		// If a already has a swizzle, strip it and add .xyz.
-		// For simplicity emit vec3 cast which GLSL ES requires for dot on 3 components.
-		body += "    "; body += dst; body += " = vec4(dot(vec3(";
-		body += a; body += "), vec3("; body += b; body += ")));\n";
+		idStr rhs = "vec4(dot(vec3("; rhs += a; rhs += "), vec3("; rhs += b; rhs += ")))";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "DP4" ) == 0 ) {
 		READ_SRC(rawA); READ_SRC(rawB);
 		idStr a = TranslateOperand(rawA.c_str()), b = TranslateOperand(rawB.c_str());
-		body += "    "; body += dst; body += " = vec4(dot(vec4(";
-		body += a; body += "), vec4("; body += b; body += ")));\n";
+		idStr rhs = "vec4(dot(vec4("; rhs += a; rhs += "), vec4("; rhs += b; rhs += ")))";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "DPH" ) == 0 ) {
 		READ_SRC(rawA); READ_SRC(rawB);
 		idStr a = TranslateOperand(rawA.c_str()), b = TranslateOperand(rawB.c_str());
-		body += "    "; body += dst; body += " = vec4(dot(vec3(";
-		body += a; body += "), vec3("; body += b; body += ")) + ("; body += b; body += ").w);\n";
+		idStr rhs = "vec4(dot(vec3("; rhs += a; rhs += "), vec3("; rhs += b; rhs += ")) + ("; rhs += b; rhs += ").w)";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "RCP" ) == 0 ) {
 		READ_SRC(rawA);
 		idStr a = TranslateOperand(rawA.c_str());
-		body += "    "; body += dst; body += " = vec4(1.0 / ("; body += a; body += ").x);\n";
+		idStr rhs = "vec4(1.0 / "; rhs += ToScalar(a); rhs += ")";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "RSQ" ) == 0 ) {
 		READ_SRC(rawA);
 		idStr a = TranslateOperand(rawA.c_str());
-		body += "    "; body += dst; body += " = vec4(inversesqrt(abs(("; body += a; body += ").x)));\n";
+		idStr rhs = "vec4(inversesqrt(abs("; rhs += ToScalar(a); rhs += ")))";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "POW" ) == 0 ) {
 		READ_SRC(rawA); READ_SRC(rawB);
 		idStr a = TranslateOperand(rawA.c_str()), b = TranslateOperand(rawB.c_str());
-		body += "    "; body += dst; body += " = vec4(pow(abs(("; body += a;
-		body += ").x), ("; body += b; body += ").x));\n";
+		idStr rhs = "vec4(pow(abs("; rhs += ToScalar(a); rhs += "), "; rhs += ToScalar(b); rhs += "))";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "EXP" ) == 0 ) {
 		READ_SRC(rawA);
 		idStr a = TranslateOperand(rawA.c_str());
-		body += "    "; body += dst; body += " = vec4(exp2(("; body += a; body += ").x));\n";
+		idStr rhs = "vec4(exp2("; rhs += ToScalar(a); rhs += "))";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "LOG" ) == 0 ) {
 		READ_SRC(rawA);
 		idStr a = TranslateOperand(rawA.c_str());
-		body += "    "; body += dst; body += " = vec4(log2(abs(("; body += a; body += ").x)));\n";
+		idStr rhs = "vec4(log2(abs("; rhs += ToScalar(a); rhs += ")))";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "MIN" ) == 0 ) {
 		READ_SRC(rawA); READ_SRC(rawB);
 		idStr a = TranslateOperand(rawA.c_str()), b = TranslateOperand(rawB.c_str());
-		body += "    "; body += dst; body += " = min("; body += a; body += ", "; body += b; body += ");\n";
+		idStr rhs = "min("; rhs += a; rhs += ", "; rhs += b; rhs += ")";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "MAX" ) == 0 ) {
 		READ_SRC(rawA); READ_SRC(rawB);
 		idStr a = TranslateOperand(rawA.c_str()), b = TranslateOperand(rawB.c_str());
-		body += "    "; body += dst; body += " = max("; body += a; body += ", "; body += b; body += ");\n";
+		idStr rhs = "max("; rhs += a; rhs += ", "; rhs += b; rhs += ")";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "ABS" ) == 0 ) {
 		READ_SRC(rawA);
 		idStr a = TranslateOperand(rawA.c_str());
-		body += "    "; body += dst; body += " = abs("; body += a; body += ");\n";
+		idStr rhs = "abs("; rhs += a; rhs += ")";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "FRC" ) == 0 ) {
 		READ_SRC(rawA);
 		idStr a = TranslateOperand(rawA.c_str());
-		body += "    "; body += dst; body += " = fract("; body += a; body += ");\n";
+		idStr rhs = "fract("; rhs += a; rhs += ")";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "FLR" ) == 0 ) {
 		READ_SRC(rawA);
 		idStr a = TranslateOperand(rawA.c_str());
-		body += "    "; body += dst; body += " = floor("; body += a; body += ");\n";
+		idStr rhs = "floor("; rhs += a; rhs += ")";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "CMP" ) == 0 ) {
-		// CMP dst, c, a, b → dst = mix(a, b, step(0.0, c));  (component-wise: c<0 → a, else → b)
-		// ARB spec: for each component, dst = (c < 0) ? a : b
-		// step(0.0, c) = 0.0 when c<0, 1.0 when c>=0 → mix(a, b, ...) = a when step=0, b when step=1 ✓
+		// CMP dst, c, a, b → dst = (c < 0) ? a : b  (component-wise)
+		// step(0.0, c) = 0 when c<0, 1 when c≥0 → mix(a, b, step) = a when c<0, b when c≥0 ✓
 		READ_SRC(rawA); READ_SRC(rawB); READ_SRC(rawC);
 		idStr c = TranslateOperand(rawA.c_str()),
 		      a = TranslateOperand(rawB.c_str()),
 		      b = TranslateOperand(rawC.c_str());
-		body += "    "; body += dst; body += " = mix(";
-		body += a; body += ", "; body += b; body += ", step(vec4(0.0), "; body += c; body += "));\n";
+		idStr rhs = "mix("; rhs += a; rhs += ", "; rhs += b; rhs += ", step(vec4(0.0), "; rhs += c; rhs += "))";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "LRP" ) == 0 ) {
 		// LRP dst, t, a, b → dst = mix(b, a, t)
@@ -550,47 +673,28 @@ static void TranslateInstruction( const char *line, bool isFragment, idStr &body
 		idStr t = TranslateOperand(rawA.c_str()),
 		      a = TranslateOperand(rawB.c_str()),
 		      b = TranslateOperand(rawC.c_str());
-		body += "    "; body += dst; body += " = mix(";
-		body += b; body += ", "; body += a; body += ", "; body += t; body += ");\n";
+		idStr rhs = "mix("; rhs += b; rhs += ", "; rhs += a; rhs += ", "; rhs += t; rhs += ")";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "SLT" ) == 0 ) {
 		READ_SRC(rawA); READ_SRC(rawB);
 		idStr a = TranslateOperand(rawA.c_str()), b = TranslateOperand(rawB.c_str());
-		body += "    "; body += dst; body += " = vec4(lessThan("; body += a; body += ", "; body += b; body += "));\n";
+		idStr rhs = "vec4(lessThan("; rhs += a; rhs += ", "; rhs += b; rhs += "))";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "SGE" ) == 0 ) {
 		READ_SRC(rawA); READ_SRC(rawB);
 		idStr a = TranslateOperand(rawA.c_str()), b = TranslateOperand(rawB.c_str());
-		body += "    "; body += dst; body += " = vec4(greaterThanEqual("; body += a; body += ", "; body += b; body += "));\n";
+		idStr rhs = "vec4(greaterThanEqual("; rhs += a; rhs += ", "; rhs += b; rhs += "))";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "XPD" ) == 0 ) {
 		READ_SRC(rawA); READ_SRC(rawB);
 		idStr a = TranslateOperand(rawA.c_str()), b = TranslateOperand(rawB.c_str());
-		body += "    "; body += dst; body += " = vec4(cross(vec3("; body += a;
-		body += "), vec3("; body += b; body += ")), 0.0);\n";
+		idStr rhs = "vec4(cross(vec3("; rhs += a; rhs += "), vec3("; rhs += b; rhs += ")), 0.0)";
+		EMIT(rhs);
 
 	} else if ( idStr::Icmp( baseOp.c_str(), "TEX" ) == 0 ) {
-		// TEX dst, coord, texture[N], 2D
-		READ_SRC(rawA); // coord
-		idStr coord = TranslateOperand(rawA.c_str());
-		p = SkipCommaOrWhitespace( p );
-		// texture[N]
-		idStr texTok;
-		p = ReadToken( p, texTok );
-		int unit = 0;
-		if ( idStr::Icmpn( texTok.c_str(), "texture[", 8 ) == 0 ) {
-			unit = atoi( texTok.c_str() + 8 );
-		}
-		AddSampler( unit );
-		// skip target type (2D)
-		p = SkipCommaOrWhitespace( p );
-		idStr typeTok; p = ReadToken( p, typeTok );
-		char ubuf[16]; idStr::snPrintf( ubuf, sizeof(ubuf), "uTex%d", unit );
-		body += "    "; body += dst; body += " = texture("; body += ubuf;
-		body += ", vec2("; body += coord; body += "));\n";
-
-	} else if ( idStr::Icmp( baseOp.c_str(), "TXP" ) == 0 ) {
-		// TXP dst, coord, texture[N], 2D
 		READ_SRC(rawA);
 		idStr coord = TranslateOperand(rawA.c_str());
 		p = SkipCommaOrWhitespace( p );
@@ -603,11 +707,26 @@ static void TranslateInstruction( const char *line, bool isFragment, idStr &body
 		p = SkipCommaOrWhitespace( p );
 		idStr typeTok; p = ReadToken( p, typeTok );
 		char ubuf[16]; idStr::snPrintf( ubuf, sizeof(ubuf), "uTex%d", unit );
-		body += "    "; body += dst; body += " = textureProj("; body += ubuf;
-		body += ", vec3("; body += coord; body += "));\n";
+		idStr rhs = "texture("; rhs += ubuf; rhs += ", vec2("; rhs += coord; rhs += "))";
+		EMIT(rhs);
+
+	} else if ( idStr::Icmp( baseOp.c_str(), "TXP" ) == 0 ) {
+		READ_SRC(rawA);
+		idStr coord = TranslateOperand(rawA.c_str());
+		p = SkipCommaOrWhitespace( p );
+		idStr texTok; p = ReadToken( p, texTok );
+		int unit = 0;
+		if ( idStr::Icmpn( texTok.c_str(), "texture[", 8 ) == 0 ) {
+			unit = atoi( texTok.c_str() + 8 );
+		}
+		AddSampler( unit );
+		p = SkipCommaOrWhitespace( p );
+		idStr typeTok; p = ReadToken( p, typeTok );
+		char ubuf[16]; idStr::snPrintf( ubuf, sizeof(ubuf), "uTex%d", unit );
+		idStr rhs = "textureProj("; rhs += ubuf; rhs += ", vec3("; rhs += coord; rhs += "))";
+		EMIT(rhs);
 
 	} else {
-		// Unknown opcode — emit a comment so the GLSL compile fails loudly
 		common->Warning( "ARB2GLSL: unknown opcode '%s'", baseOp.c_str() );
 		body += "    /* ARB2GLSL: unhandled opcode: ";
 		body += opcode.c_str();
@@ -615,6 +734,7 @@ static void TranslateInstruction( const char *line, bool isFragment, idStr &body
 	}
 
 	#undef READ_SRC
+	#undef EMIT
 }
 
 // ---------------------------------------------------------------------------
@@ -632,7 +752,7 @@ static void ScanLine( const char *line ) {
 		// TEMP name1, name2, ...;  (may span to end of line)
 		while ( *p ) {
 			p = SkipWhitespace( p );
-			if ( !*p || *p == '\n' || *p == '\r' ) break;
+			if ( !*p || *p == '\n' || *p == '\r' || *p == ';' ) break;
 			idStr name;
 			p = ReadToken( p, name );
 			// strip trailing semicolon
@@ -734,6 +854,7 @@ static void ScanLine( const char *line ) {
 bool ARB2GLSL_Translate( const char *arbSrc, bool isFragment, idStr &outGLSL ) {
 	outGLSL.Clear();
 	ResetState();
+	s_isFragment = isFragment;
 
 	if ( !arbSrc || !*arbSrc ) {
 		common->Warning( "ARB2GLSL_Translate: empty input" );
@@ -797,11 +918,15 @@ bool ARB2GLSL_Translate( const char *arbSrc, bool isFragment, idStr &outGLSL ) {
 	out += "#version 300 es\n";
 	out += "precision highp float;\n\n";
 
-	// program.env uniform array
+	// program.env uniform array — use a fixed size so VP and FP always agree,
+	// preventing "uniform declared as different types" link errors.
 	if ( s_maxEnvIndex >= 0 ) {
-		char buf[64];
-		idStr::snPrintf( buf, sizeof(buf), "uniform vec4 uProgramEnv[%d];\n", s_maxEnvIndex + 1 );
-		out += buf;
+		out += "uniform vec4 uProgramEnv[32];\n";
+	}
+
+	// state.matrix.mvp rows (used by shaders that don't use ARB_position_invariant)
+	if ( s_needsMVPRows ) {
+		out += "uniform vec4 uMVPRows[4];\n";
 	}
 
 	// Sampler uniforms
@@ -836,12 +961,18 @@ bool ARB2GLSL_Translate( const char *arbSrc, bool isFragment, idStr &outGLSL ) {
 		if ( s_needsTangent )    out += "in vec4 aTangent;\n";
 		if ( s_needsBitangent )  out += "in vec4 aBitangent;\n";
 		if ( s_needsColor )      out += "in vec4 aColor;\n";
-		// Vertex shader outputs
-		if ( s_writesTexCoord )  out += "out vec4 vTexCoord0;\n";
+		// Vertex shader outputs — one varying per result.texcoord[N] index written
+		for ( int i = 0; i <= s_maxWriteTexCoord; i++ ) {
+			char buf[32]; idStr::snPrintf( buf, sizeof(buf), "out vec4 vTexCoord%d;\n", i );
+			out += buf;
+		}
 		if ( s_writesVaryingColor ) out += "out vec4 vColor;\n";
 	} else {
-		// Fragment shader inputs from VP
-		if ( s_needsFragTexCoord ) out += "in vec4 vTexCoord0;\n";
+		// Fragment shader inputs — one varying per fragment.texcoord[N] index read
+		for ( int i = 0; i <= s_maxReadTexCoord; i++ ) {
+			char buf[32]; idStr::snPrintf( buf, sizeof(buf), "in vec4 vTexCoord%d;\n", i );
+			out += buf;
+		}
 		if ( s_needsFragColor )    out += "in vec4 vColor;\n";
 		// Fragment output (replaces gl_FragColor in GLSL ES 3.00)
 		out += "out vec4 fragColor;\n";
