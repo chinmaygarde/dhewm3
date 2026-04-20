@@ -16,11 +16,14 @@ This project uses CMake. All source lives in `neo/`, and builds output to `build
 
 **Using the justfile (recommended for macOS development):**
 ```bash
-just gen      # cmake -S neo --preset debug
-just build    # gen + cmake --build build
-just run      # build + launch dhewm3.app with game assets
-just clean    # remove build/
-just assets   # download game demo assets
+just gen-arb      # cmake -S neo --preset debug
+just build-arb    # gen-arb + cmake --build build/arb
+just run-arb      # build-arb + launch dhewm3.app with game assets
+just clean-arb    # remove build/
+just assets       # download game demo assets
+just gen-gles3    # cmake -S neo --preset gles3-debug
+just build-gles3  # gen-gles3 + cmake --build build/gles3
+just run-gles3    # build-gles3 + launch gles3 build with game assets
 ```
 
 **Manual CMake:**

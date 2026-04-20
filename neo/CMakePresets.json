@@ -18,7 +18,7 @@
       "name": "debug",
       "inherits": "macos-setup",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/../build",
+      "binaryDir": "${sourceDir}/../build/arb",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
@@ -66,7 +66,7 @@
       "name": "linux-debug",
       "inherits": "linux-setup",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/../build",
+      "binaryDir": "${sourceDir}/../build/arb",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }

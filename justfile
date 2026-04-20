@@ -1,11 +1,11 @@
 _preset := if os() == "macos" { "debug" } else { "linux-debug" }
 _gles3_preset := if os() == "macos" { "gles3-debug" } else { "linux-gles3-debug" }
 
-gen:
+gen-arb:
   cmake -S neo --preset {{ _preset }}
 
-build: gen
-  cmake --build build
+build-arb: gen-arb
+  cmake --build build/arb
 
 assets:
   #!/usr/bin/env bash
@@ -34,14 +34,14 @@ run-gles3: build-gles3 assets
     build/gles3/dhewm3 +set fs_basepath build/
   fi
 
-run: build assets
+run-arb: build-arb assets
   #!/usr/bin/env bash
   set -euo pipefail
   if [ "{{ os() }}" = "macos" ]; then
-    open build/dhewm3.app
+    open build/arb/dhewm3.app
   else
-    build/dhewm3
+    build/arb/dhewm3 +set fs_basepath build/
   fi
 
-clean:
+clean-arb:
   rm -rf build
